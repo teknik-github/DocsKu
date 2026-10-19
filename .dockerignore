@@ -1,0 +1,13 @@
+# Never send secrets into the build: Next.js would read .env* files during `next build`.
+.env*
+
+node_modules
+.next
+storage
+.git
+*.log
+*.tsbuildinfo
+Dockerfile
+docker-compose*.yml
+deploy
+README.md

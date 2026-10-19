@@ -1,0 +1,23 @@
+---
+title: Autentikasi
+description: Kirim kunci API di header setiap permintaan.
+---
+
+Setiap permintaan harus menyertakan kunci API di header `Authorization`.
+
+```bash
+curl https://api.contoh.com/v1/items \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+<Danger>
+  Jangan pernah menaruh kunci API di kode sisi klien atau repositori publik.
+</Danger>
+
+## Menyimpan kunci API
+
+Simpan kunci API sebagai variabel lingkungan:
+
+```bash title=".env.local"
+API_KEY=kunci_rahasia_anda
+```

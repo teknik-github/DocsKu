@@ -1,0 +1,65 @@
+---
+title: Blok kode
+description: Pewarnaan sintaks, judul file, baris yang disorot, dan grup kode bertab.
+---
+
+Blok kode diwarnai otomatis (dengan [Shiki](https://shiki.style)) dan mengikuti tema terang/gelap. Arahkan kursor ke blok kode untuk menampilkan tombol salin.
+
+## Blok kode dasar
+
+Ketik <kbd>/</kbd> lalu pilih **Blok kode**. Pilih bahasa dari daftar di bagian atas blok.
+
+```ts
+export function sapa(nama: string) {
+  return `Halo, ${nama}!`;
+}
+```
+
+## Judul file
+
+Isi kolom **Judul / nama file** di blok kode:
+
+```ts title="lib/sapa.ts"
+export function sapa(nama: string) {
+  return `Halo, ${nama}!`;
+}
+```
+
+## Menyorot baris
+
+Isi kolom **Sorot** dengan nomor baris, misalnya `2` atau `1,3-4`:
+
+```ts {2}
+export function sapa(nama: string) {
+  return `Halo, ${nama}!`;
+}
+```
+
+## Nomor baris
+
+Centang **No. baris**:
+
+```py showLineNumbers
+def sapa(nama):
+    return f"Halo, {nama}!"
+
+print(sapa("Dunia"))
+```
+
+## Grup kode
+
+Pilih **Grup kode** dari menu <kbd>/</kbd>. Setiap blok kode di dalamnya menjadi satu tab, dan label tab diambil dari judul blok.
+
+<CodeGroup>
+```bash title="pnpm"
+pnpm add paket-saya
+```
+
+```bash title="npm"
+npm install paket-saya
+```
+
+```bash title="yarn"
+yarn add paket-saya
+```
+</CodeGroup>

@@ -1,0 +1,49 @@
+# Production app on top of docker-compose.yml (PostgreSQL). HTTPS is done by your own reverse proxy,
+# which forwards to APP_PORT on this host (see README → Produksi).
+# Use deploy/deploy.sh, which runs migrations before building. By hand:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d --build
+# Settings: .env.production (see .env.production.example).
+
+x-database-url: &database-url postgres://docsku:${POSTGRES_PASSWORD}@postgres:5432/docsku
+
+services:
+  migrate:
+    build:
+      context: .
+      target: migrator
+    image: docsku-migrate
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runner
+      # `next build` prerenders pages from the database published on the host (docker-compose.yml).
+      network: host
+      args:
+        DATABASE_URL: postgres://docsku:${POSTGRES_PASSWORD}@127.0.0.1:5491/docsku
+        SITE_URL: ${SITE_URL:?set SITE_URL in .env.production}
+    image: docsku-app
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      DATABASE_URL: *database-url
+      # Only the reverse proxy can reach the app (127.0.0.1 below), so its X-Forwarded-* headers are trusted.
+      TRUST_PROXY: "1"
+      UPLOAD_DIR: /app/storage/uploads
+    volumes:
+      # Same folder the dev server uses; must be writable by uid 10001 (see deploy/deploy.sh).
+      - ./storage/uploads:/app/storage/uploads
+    ports:
+      # Local only: put your HTTPS reverse proxy in front of it.
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-3020}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully

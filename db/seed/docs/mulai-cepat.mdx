@@ -1,0 +1,41 @@
+---
+title: Mulai cepat
+description: Masuk ke dashboard dan terbitkan halaman pertama Anda.
+---
+
+## Masuk ke dashboard
+
+<Steps>
+  <Step title="Buka dashboard">
+    Buka `/admin` di browser. Saat pertama kali, Anda diarahkan ke halaman setup untuk membuat akun admin.
+  </Step>
+  <Step title="Buat halaman">
+    Di menu **Halaman**, klik **Halaman baru**. Tulis judul, deskripsi singkat, lalu isi halaman.
+  </Step>
+  <Step title="Terbitkan">
+    Klik **Terbitkan** di kanan atas. Halaman langsung tampil di situs.
+  </Step>
+  <Step title="Tambahkan ke navigasi">
+    Buka menu **Navigasi** dan tambahkan halaman ke tab dan section yang sesuai, agar muncul di sidebar dan pencarian.
+  </Step>
+</Steps>
+
+<Note>
+  Draf disimpan otomatis saat Anda mengetik. Pengunjung baru melihat perubahan setelah Anda menekan **Terbitkan** atau **Perbarui**.
+</Note>
+
+## Menjalankan secara lokal
+
+<CodeGroup>
+```bash title="Pengembangan"
+pnpm db:up
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
+```
+
+```bash title="Produksi"
+pnpm build
+pnpm start
+```
+</CodeGroup>

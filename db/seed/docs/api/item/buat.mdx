@@ -1,0 +1,32 @@
+---
+title: Buat item
+description: Buat item baru.
+---
+
+```http
+POST /v1/items
+```
+
+## Isi permintaan
+
+| Field | Tipe | Wajib | Keterangan |
+| --- | --- | --- | --- |
+| `name` | string | Ya | Nama item. |
+| `description` | string | Tidak | Deskripsi item. |
+
+## Contoh permintaan
+
+```bash
+curl https://api.contoh.com/v1/items \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Item baru" }'
+```
+
+## Contoh respons
+
+```json
+{
+  "data": { "id": "item_125", "name": "Item baru" }
+}
+```

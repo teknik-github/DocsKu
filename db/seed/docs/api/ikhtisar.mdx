@@ -1,0 +1,45 @@
+---
+title: Ikhtisar API
+description: Konsep dasar, URL dasar, dan format respons API.
+---
+
+API ini menggunakan prinsip REST. Permintaan dan respons berformat JSON.
+
+## URL dasar
+
+```text
+https://api.contoh.com/v1
+```
+
+## Format respons
+
+Respons yang berhasil membungkus data di dalam `data`:
+
+```json
+{
+  "data": [
+    { "id": "item_123", "name": "Contoh item" }
+  ],
+  "has_more": false
+}
+```
+
+## Kode status
+
+| Kode | Arti |
+| --- | --- |
+| `200` | Berhasil |
+| `400` | Permintaan tidak valid |
+| `401` | Kunci API tidak ada atau salah |
+| `404` | Sumber daya tidak ditemukan |
+| `429` | Terlalu banyak permintaan |
+| `500` | Kesalahan server |
+
+<CardGroup cols={2}>
+  <Card title="Autentikasi" icon="key" href="/docs/api/autentikasi">
+    Cara mengirim kunci API.
+  </Card>
+  <Card title="Daftar item" icon="database" href="/docs/api/item/daftar">
+    Endpoint pertama Anda.
+  </Card>
+</CardGroup>

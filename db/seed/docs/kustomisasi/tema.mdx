@@ -1,0 +1,35 @@
+---
+title: Tema dan warna
+description: Ubah warna merek, palet terang/gelap, dan font.
+---
+
+## Warna
+
+Semua warna didefinisikan sebagai variabel CSS di `app/globals.css`, masing-masing untuk mode terang (`:root`) dan gelap (`.dark`).
+
+```css title="app/globals.css"
+:root {
+  --page: #faf9f5;    /* latar halaman */
+  --surface: #ffffff; /* kartu, panel */
+  --fg: #141413;      /* teks utama */
+  --accent: #d97757;  /* warna merek */
+}
+```
+
+Variabel tersebut tersedia sebagai kelas Tailwind, misalnya `bg-page`, `bg-surface`, `text-fg`, `text-fg-muted`, `border-line`, dan `text-accent`.
+
+<Tip>
+  Untuk mengganti warna merek, cukup ubah `--accent`, `--accent-strong`, dan `--accent-soft` di kedua mode.
+</Tip>
+
+## Mode gelap
+
+Tombol matahari/bulan di header menyimpan pilihan pengguna di browser. Jika belum ada pilihan, tema mengikuti pengaturan sistem.
+
+## Font
+
+| Peran | Font | Kelas |
+| --- | --- | --- |
+| Teks antarmuka | Geist | `font-sans` |
+| Judul besar | Source Serif 4 | `font-serif` |
+| Kode | Geist Mono | `font-mono` |

@@ -1,0 +1,43 @@
+---
+title: Daftar item
+description: Ambil daftar item dengan paginasi.
+---
+
+```http
+GET /v1/items
+```
+
+## Parameter kueri
+
+| Parameter | Tipe | Keterangan |
+| --- | --- | --- |
+| `limit` | integer | Jumlah item per halaman. Bawaan `20`, maksimum `100`. |
+| `after` | string | ID item terakhir dari halaman sebelumnya. |
+
+## Contoh permintaan
+
+<CodeGroup>
+```bash title="cURL"
+curl "https://api.contoh.com/v1/items?limit=2" \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+```js title="JavaScript"
+const res = await fetch("https://api.contoh.com/v1/items?limit=2", {
+  headers: { Authorization: `Bearer ${process.env.API_KEY}` },
+});
+const items = await res.json();
+```
+</CodeGroup>
+
+## Contoh respons
+
+```json
+{
+  "data": [
+    { "id": "item_123", "name": "Item pertama" },
+    { "id": "item_124", "name": "Item kedua" }
+  ],
+  "has_more": true
+}
+```

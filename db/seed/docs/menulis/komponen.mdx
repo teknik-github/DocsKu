@@ -1,0 +1,56 @@
+---
+title: Komponen
+description: Blok siap pakai yang bisa disisipkan dari menu "/" di editor.
+---
+
+Semua komponen di halaman ini bisa disisipkan dari editor dengan mengetik <kbd>/</kbd> lalu memilih bloknya.
+
+## Callout
+
+<Note>Catatan umum untuk informasi tambahan.</Note>
+
+<Info title="Info">Informasi netral yang perlu diketahui pembaca.</Info>
+
+<Tip>Saran atau cara yang lebih baik.</Tip>
+
+<Check>Konfirmasi bahwa sesuatu berhasil.</Check>
+
+<Warning>Hal yang perlu diperhatikan sebelum melanjutkan.</Warning>
+
+<Danger>Tindakan yang berbahaya atau tidak bisa dibatalkan.</Danger>
+
+Ganti jenis callout dari pilihan di pojok kiri atasnya, dan isi judulnya bila perlu.
+
+## Kartu
+
+<CardGroup cols={3}>
+  <Card title="Dengan ikon" icon="sparkles">Kartu tanpa tautan.</Card>
+  <Card title="Dengan tautan" icon="book" href="/docs/pengenalan">Klik untuk berpindah halaman.</Card>
+  <Card title="Tautan luar" icon="globe" href="https://nextjs.org">Terbuka di tab baru.</Card>
+</CardGroup>
+
+Atur jumlah kolom, ikon, judul, deskripsi, dan tautan langsung di blok kartu.
+
+## Langkah
+
+<Steps>
+  <Step title="Langkah pertama">Isi langkah bisa berupa teks, daftar, atau blok kode.</Step>
+  <Step title="Langkah kedua">Nomor langkah dibuat otomatis.</Step>
+</Steps>
+
+## Tab
+
+<Tabs>
+  <Tab title="macOS">Pasang dengan `brew install node`.</Tab>
+  <Tab title="Windows">Unduh installer dari situs resmi Node.js.</Tab>
+  <Tab title="Linux">Gunakan package manager distribusi Anda.</Tab>
+</Tabs>
+
+## Accordion
+
+<Accordion title="Apakah komponen bisa disusun bertingkat?">
+  Bisa. Callout, langkah, tab, dan accordion dapat berisi paragraf, daftar, blok kode, dan blok lainnya.
+</Accordion>
+<Accordion title="Bagaimana menambah komponen sendiri?">
+  Tambahkan node di `components/admin/editor/nodes.tsx`, lalu tampilannya di `lib/content/render.tsx`.
+</Accordion>

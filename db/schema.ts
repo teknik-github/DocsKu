@@ -1,0 +1,171 @@
+import type { JSONContent } from "@tiptap/core";
+import { sql } from "drizzle-orm";
+import type { PageSeo } from "@/lib/site-types";
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+export const roleEnum = pgEnum("role", ["admin", "editor"]);
+export const pageStatusEnum = pgEnum("page_status", ["draft", "scheduled", "published"]);
+/** "home" is the single page shown at "/"; everything else lives under /docs. */
+export const pageKindEnum = pgEnum("page_kind", ["doc", "home"]);
+
+const timestamps = {
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+};
+
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  role: roleEnum("role").notNull().default("editor"),
+  ...timestamps,
+});
+
+/** Session id is the SHA-256 of the cookie token, so a DB leak can't be replayed. */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("sessions_user_idx").on(t.userId)],
+);
+
+export const pages = pgTable(
+  "pages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: pageKindEnum("kind").notNull().default("doc"),
+    /** Path under /docs, e.g. "menulis/komponen". The home page uses "_home". */
+    slug: text("slug").notNull().unique(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    /**
+     * Two copies of the page: the live version (title/description/content),
+     * which visitors see once published, and the working copy (draft*), which
+     * the editor autosaves. Publishing copies the working copy to the live one.
+     */
+    content: jsonb("content").$type<JSONContent>().notNull(),
+    draftTitle: text("draft_title").notNull(),
+    draftDescription: text("draft_description").notNull().default(""),
+    draftContent: jsonb("draft_content").$type<JSONContent>().notNull(),
+    /** Cover image (URL), live and working copy; shown on cards and articles in the "publication" layout. */
+    coverImage: text("cover_image"),
+    draftCoverImage: text("draft_cover_image"),
+    /** Search/social metadata, live and working copy, like the fields above. */
+    seo: jsonb("seo").$type<PageSeo>().notNull().default({}),
+    draftSeo: jsonb("draft_seo").$type<PageSeo>().notNull().default({}),
+    /** Shown first and labelled "Unggulan" in the Ghost-style layout. Applies immediately. */
+    featured: boolean("featured").notNull().default(false),
+    /**
+     * Where the first publish adds the page in the navigation: a section id,
+     * "none" to leave it out, or null to let AI (or the first section) decide.
+     */
+    navSection: text("nav_section"),
+    /** Working copy differs from what is live. */
+    hasChanges: boolean("has_changes").notNull().default(false),
+    status: pageStatusEnum("status").notNull().default("draft"),
+    /** When the page went (or goes, if scheduled) live. */
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
+    updatedById: uuid("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (t) => [
+    index("pages_status_idx").on(t.status, t.publishedAt),
+    uniqueIndex("pages_one_home").on(t.kind).where(sql`kind = 'home'`),
+  ],
+);
+
+export const pageRevisions = pgTable(
+  "page_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    content: jsonb("content").$type<JSONContent>().notNull(),
+    seo: jsonb("seo").$type<PageSeo>().notNull().default({}),
+    coverImage: text("cover_image"),
+    /** What produced this snapshot: a manual save, a publish, or a restore. */
+    reason: text("reason").notNull(),
+    createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("page_revisions_page_idx").on(t.pageId, t.createdAt)],
+);
+
+export const media = pgTable("media", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** Name of the stored file in UPLOAD_DIR. */
+  filename: text("filename").notNull().unique(),
+  originalName: text("original_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  size: integer("size").notNull(),
+  uploadedById: uuid("uploaded_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Small JSON documents keyed by name: "site", "navigation". */
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+export type User = typeof users.$inferSelect;
+export type Role = (typeof roleEnum.enumValues)[number];
+export type Page = typeof pages.$inferSelect;
+export type PageStatus = (typeof pageStatusEnum.enumValues)[number];
+export type PageKind = (typeof pageKindEnum.enumValues)[number];
+export type PageRevision = typeof pageRevisions.$inferSelect;
+export type Media = typeof media.$inferSelect;
+
+/** AI Chat conversations, private to each user. */
+export const aiConversations = pgTable(
+  "ai_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Set for chats started from the editor panel of a page. */
+    pageId: uuid("page_id").references(() => pages.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    /** Model override for this chat; null uses the model from Settings. */
+    model: text("model"),
+    /** Full transcript shown in the UI (ChatMessage[] in lib/ai/chat-types.ts). */
+    messages: jsonb("messages").$type<unknown[]>().notNull().default([]),
+    /** Auto-compaction: a summary standing in for the first `compactedCount` messages. */
+    summary: text("summary"),
+    compactedCount: integer("compacted_count").notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [index("ai_conversations_user_idx").on(t.userId, t.updatedAt)],
+);
+
+export type AiConversation = typeof aiConversations.$inferSelect;
