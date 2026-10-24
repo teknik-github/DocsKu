@@ -23,6 +23,7 @@ const REASONS: Record<string, string> = {
   restore: "Dipulihkan",
   import: "Diimpor",
   ai: "Dibuat dengan AI",
+  mcp: "Lewat MCP",
 };
 
 /** Navigation info for the editor (see navigationForEditor in lib/automation.ts). */

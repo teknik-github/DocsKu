@@ -68,6 +68,22 @@ Agen penulis di **AI Chat** (menu dashboard) dan di panel **AI Chat** pada edito
 - **Ringkas otomatis:** percakapan panjang diringkas sendiri agar tetap hemat token. Bisa juga lewat tombol **Ringkas sekarang**.
 - **Hemat token:** prompt disusun agar memanfaatkan *prompt caching* DeepSeek. Jumlah token, termasuk yang diambil dari cache, tampil di bawah setiap jawaban. Aksi AI Write yang sama persis dijawab dari cache server tanpa memakai token.
 
+## MCP
+
+Menu **MCP** di dashboard menghubungkan Docsku dengan aplikasi AI lewat [Model Context Protocol](https://modelcontextprotocol.io).
+
+**Docsku sebagai server MCP** (`/api/mcp`). Buat token di menu MCP, pilih izinnya, lalu salin perintah atau konfigurasi untuk Claude Code, Cursor/VS Code, atau Claude Desktop yang ditampilkan setelah token dibuat. Token hanya tampil sekali.
+
+| Izin | Tool |
+| --- | --- |
+| Baca | `search_pages`, `list_pages`, `read_page`, `get_site_structure` |
+| Tulis draf | `create_draft`, `update_draft` (tidak mengubah situs sampai diterbitkan) |
+| Terbitkan | `publish_page` (sekarang atau terjadwal), `unpublish_page` |
+
+Klien hanya melihat tool yang diizinkan tokennya. Token bertindak atas nama pemiliknya, tercatat di riwayat revisi sebagai "Lewat MCP", bisa diberi masa berlaku, dan bisa dicabut kapan saja.
+
+**AI Chat memakai server MCP lain** (khusus admin). Tambahkan alamat server MCP jarak jauh (Streamable HTTP) beserta header login bila perlu (disimpan terenkripsi). Docsku mengambil daftar tool-nya, lalu Anda memilih tool mana yang boleh dipakai agen. Tool yang ditandai server sebagai baca saja langsung aktif; tool yang bisa mengubah sesuatu harus diaktifkan manual.
+
 ## SEO
 
 Panel **Pengaturan halaman** di editor berisi meta title, meta description, gambar pratinjau sosial (Open Graph), dan noindex, lengkap dengan pratinjau hasil pencarian. Isi `SITE_URL` di `.env.local` (mis. `https://docs.contoh.com`) agar gambar pratinjau sosial memakai alamat lengkap.

@@ -169,3 +169,29 @@ export const aiConversations = pgTable(
 );
 
 export type AiConversation = typeof aiConversations.$inferSelect;
+
+/**
+ * Personal API tokens for the MCP endpoint (/api/mcp). Only the SHA-256 of the
+ * token is stored; `prefix` is shown in the dashboard to tell tokens apart.
+ * A token never has more rights than its user: scopes narrow what the user may do.
+ */
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    prefix: text("prefix").notNull(),
+    /** Subset of "read", "write", "publish" (lib/mcp/scopes.ts). */
+    scopes: text("scopes").array().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("api_tokens_user_idx").on(t.userId)],
+);
+
+export type ApiToken = typeof apiTokens.$inferSelect;

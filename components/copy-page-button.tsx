@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { copyText } from "@/lib/copy-text";
 
 export function CopyPageButton({ markdown }: { markdown: string }) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
-    await navigator.clipboard.writeText(markdown);
+    if (!(await copyText(markdown))) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }

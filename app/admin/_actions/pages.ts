@@ -2,96 +2,31 @@
 
 import { redirect } from "next/navigation";
 import { updateTag } from "next/cache";
-import { and, desc, eq, inArray, ne, notInArray } from "drizzle-orm";
-import type { JSONContent } from "@tiptap/core";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
 import { EMPTY_DOC } from "@/lib/content/doc";
-import { mdxToDoc } from "@/lib/content/mdx-to-doc";
 import { PLACEHOLDER_SLUG, slugify, uniqueSlug } from "@/lib/slug";
-import { addToNavigation, NO_NAV, prepareForPublish, readAutomation, resolveSection, type Filled } from "@/lib/automation";
+import { NO_NAV, resolveSection } from "@/lib/automation";
+import {
+  NOT_FOUND,
+  addRevision,
+  createPageFromMarkdown,
+  draftSchema,
+  markdownPageSchema,
+  publishWorkingCopy,
+  saveWorkingCopy,
+  slugSchema,
+  unpublish,
+  type DraftInput,
+  type PublishResult,
+} from "@/lib/pages/service";
 import type { NavigationData, NavItemData } from "@/lib/site-types";
-
-const MAX_REVISIONS = 50;
-const MAX_CONTENT_BYTES = 2_000_000;
 
 export type SaveResult = { ok: true; savedAt: string; hasChanges: boolean } | { ok: false; error: string };
 
-const slugSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .max(200, "Slug terlalu panjang.")
-  .regex(
-    /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/,
-    "Gunakan huruf kecil, angka, tanda hubung, dan / untuk sub-folder.",
-  );
-
-/** Search/social fields; empty strings are dropped so the page title/description apply. */
-const seoSchema = z
-  .object({
-    title: z.string().trim().max(120, "Meta title terlalu panjang.").optional(),
-    description: z.string().trim().max(320, "Meta description terlalu panjang.").optional(),
-    image: z
-      .string()
-      .trim()
-      .max(500)
-      .refine((v) => v === "" || /^(https?:\/\/|\/(?!\/))/i.test(v), "Gambar harus berupa URL http(s) atau /media/…")
-      .optional(),
-    noindex: z.boolean().optional(),
-  })
-  .transform((seo) => Object.fromEntries(Object.entries(seo).filter(([, v]) => v !== "" && v !== undefined && v !== false)));
-
-const draftSchema = z.object({
-  title: z.string().trim().max(200, "Judul terlalu panjang."),
-  description: z.string().trim().max(500, "Deskripsi terlalu panjang."),
-  content: z.custom<JSONContent>(
-    (value) =>
-      typeof value === "object" &&
-      value !== null &&
-      (value as JSONContent).type === "doc" &&
-      JSON.stringify(value).length <= MAX_CONTENT_BYTES,
-    "Konten tidak valid atau terlalu besar.",
-  ),
-  seo: seoSchema.optional().default({}),
-  /** Cover image URL; null or "" removes it. */
-  cover: z
-    .string()
-    .trim()
-    .max(500)
-    .refine((v) => v === "" || /^(https?:\/\/|\/(?!\/))/i.test(v), "Gambar sampul harus berupa URL http(s) atau /media/…")
-    .nullable()
-    .optional()
-    .transform((v) => v || null),
-});
-type DraftInput = z.input<typeof draftSchema>;
-type Draft = z.output<typeof draftSchema>;
-
 const isId = (id: unknown): id is string => z.uuid().safeParse(id).success;
-const NOT_FOUND = "Halaman tidak ditemukan.";
-
-async function addRevision(pageId: string, draft: Draft, reason: string, userId: string) {
-  await db.insert(schema.pageRevisions).values({
-    pageId,
-    title: draft.title,
-    description: draft.description,
-    content: draft.content,
-    seo: draft.seo,
-    coverImage: draft.cover ?? null,
-    reason,
-    createdById: userId,
-  });
-  const keep = db
-    .select({ id: schema.pageRevisions.id })
-    .from(schema.pageRevisions)
-    .where(eq(schema.pageRevisions.pageId, pageId))
-    .orderBy(desc(schema.pageRevisions.createdAt))
-    .limit(MAX_REVISIONS);
-  await db
-    .delete(schema.pageRevisions)
-    .where(and(eq(schema.pageRevisions.pageId, pageId), notInArray(schema.pageRevisions.id, keep)));
-}
 
 /** Pages, navigation, and search all derive from published pages. */
 function refreshPublicSite() {
@@ -128,119 +63,7 @@ export async function saveDraft(pageId: string, input: DraftInput, revision = fa
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
 
-  const [page] = await db
-    .select({ status: schema.pages.status })
-    .from(schema.pages)
-    .where(eq(schema.pages.id, pageId));
-  if (!page) return { ok: false, error: "Halaman tidak ditemukan." };
-
-  const hasChanges = page.status !== "draft";
-  const [saved] = await db
-    .update(schema.pages)
-    .set({
-      draftTitle: parsed.data.title,
-      draftDescription: parsed.data.description,
-      draftContent: parsed.data.content,
-      draftSeo: parsed.data.seo,
-      draftCoverImage: parsed.data.cover ?? null,
-      hasChanges,
-      updatedById: user.id,
-    })
-    .where(eq(schema.pages.id, pageId))
-    .returning({ updatedAt: schema.pages.updatedAt });
-  if (revision) await addRevision(pageId, parsed.data, "save", user.id);
-  return { ok: true, savedAt: saved.updatedAt.toISOString(), hasChanges };
-}
-
-type PublishResult =
-  | { ok: false; error: string }
-  | { ok: true; savedAt: string; hasChanges: false; status: "published" | "scheduled"; publishedAt: string; slug: string; filled: Filled };
-
-/**
- * Publishes a working copy now, or schedules it when `publishAt` is in the
- * future. Re-publishing an already published page updates the live version.
- * Doc pages go through automation first (lib/automation.ts), and a first
- * publish adds the page to the navigation.
- */
-async function publishWorkingCopy(pageId: string, input: Draft, publishAt: string | null, userId: string): Promise<PublishResult> {
-  if (!input.title) return { ok: false, error: "Beri judul sebelum menerbitkan." };
-  const [page] = await db
-    .select({
-      status: schema.pages.status,
-      publishedAt: schema.pages.publishedAt,
-      kind: schema.pages.kind,
-      slug: schema.pages.slug,
-      navSection: schema.pages.navSection,
-    })
-    .from(schema.pages)
-    .where(eq(schema.pages.id, pageId));
-  if (!page) return { ok: false, error: NOT_FOUND };
-
-  let status: "published" | "scheduled" = "published";
-  let publishedAt = page.status === "published" && page.publishedAt ? page.publishedAt : new Date();
-  if (publishAt) {
-    const when = new Date(publishAt);
-    if (Number.isNaN(when.getTime())) return { ok: false, error: "Tanggal terbit tidak valid." };
-    if (when.getTime() > Date.now() + 30_000) {
-      if (page.status === "published") {
-        return { ok: false, error: "Halaman ini sudah terbit. Batalkan terbit dulu untuk menjadwalkannya." };
-      }
-      status = "scheduled";
-      publishedAt = when;
-    }
-  }
-
-  const firstPublish = page.status !== "published";
-  const settings = await readAutomation();
-  let draft: Draft = input;
-  let { slug, navSection } = page;
-  let filled: Filled = {};
-  if (page.kind === "doc") {
-    ({ draft, slug, navSection, filled } = await prepareForPublish({ pageId, draft: input, slug, navSection, firstPublish, settings }));
-  }
-
-  // A scheduled page keeps its working copy; the scheduler copies it when due.
-  const live =
-    status === "published"
-      ? { title: draft.title, description: draft.description, content: draft.content, seo: draft.seo, coverImage: draft.cover ?? null, hasChanges: false }
-      : {};
-  const [saved] = await db
-    .update(schema.pages)
-    .set({
-      draftTitle: draft.title,
-      draftDescription: draft.description,
-      draftContent: draft.content,
-      draftSeo: draft.seo,
-      draftCoverImage: draft.cover ?? null,
-      ...live,
-      slug,
-      navSection,
-      status,
-      publishedAt,
-      updatedById: userId,
-    })
-    .where(eq(schema.pages.id, pageId))
-    .returning({ updatedAt: schema.pages.updatedAt });
-  await addRevision(pageId, draft, status === "published" ? "publish" : "schedule", userId);
-  if (status === "published") {
-    refreshPublicSite();
-    if (page.kind === "doc" && firstPublish && settings.navigation) {
-      const added = await addToNavigation(pageId, navSection);
-      if (added) {
-        filled = { ...filled, section: added };
-        updateTag("navigation");
-      }
-    }
-  }
-  return {
-    ok: true,
-    savedAt: saved.updatedAt.toISOString(),
-    hasChanges: false,
-    status,
-    publishedAt: publishedAt.toISOString(),
-    slug,
-    filled,
-  };
+  return saveWorkingCopy(pageId, parsed.data, user.id, revision ? "save" : undefined);
 }
 
 /** Publishes (or schedules) the editor's working copy. */
@@ -250,7 +73,7 @@ export async function publishPage(pageId: string, input: DraftInput, publishAt: 
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  return publishWorkingCopy(pageId, parsed.data, publishAt, user.id);
+  return publishWorkingCopy(pageId, parsed.data, publishAt, user.id, updateTag);
 }
 
 /** Where the first publish puts the page in the navigation: a section id, "none", or null (automatic). */
@@ -269,14 +92,7 @@ export async function unpublishPage(pageId: string): Promise<SaveResult> {
   const user = await authorize();
   if ("error" in user) return { ok: false, error: user.error };
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
-  const [page] = await db
-    .update(schema.pages)
-    .set({ status: "draft", hasChanges: false, updatedById: user.id })
-    .where(eq(schema.pages.id, pageId))
-    .returning({ updatedAt: schema.pages.updatedAt });
-  if (!page) return { ok: false, error: "Halaman tidak ditemukan." };
-  refreshPublicSite();
-  return { ok: true, savedAt: page.updatedAt.toISOString(), hasChanges: false };
+  return unpublish(pageId, user.id, updateTag);
 }
 
 /** Discards unpublished edits by copying the live version back into the working copy. */
@@ -285,7 +101,7 @@ export async function discardChanges(pageId: string) {
   if ("error" in user) return { ok: false as const, error: user.error };
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const [page] = await db.select().from(schema.pages).where(eq(schema.pages.id, pageId));
-  if (!page) return { ok: false as const, error: "Halaman tidak ditemukan." };
+  if (!page) return { ok: false as const, error: NOT_FOUND };
   await db
     .update(schema.pages)
     .set({
@@ -401,7 +217,7 @@ export async function restoreRevision(pageId: string, revisionId: string) {
     .select({ status: schema.pages.status })
     .from(schema.pages)
     .where(eq(schema.pages.id, pageId));
-  if (!page) return { ok: false as const, error: "Halaman tidak ditemukan." };
+  if (!page) return { ok: false as const, error: NOT_FOUND };
 
   const draft = { title: revision.title, description: revision.description, content: revision.content, seo: revision.seo, cover: revision.coverImage };
   await db
@@ -420,14 +236,7 @@ export async function restoreRevision(pageId: string, revisionId: string) {
   return { ok: true as const, draft };
 }
 
-const aiDraftSchema = z.object({
-  title: z.string().trim().min(1, "Judul kosong.").max(200),
-  description: z.string().trim().max(500).optional(),
-  slug: z.string().trim().max(200).optional(),
-  content: z.string().max(60_000),
-  seo: z.object({ title: z.string().trim().max(120).optional(), description: z.string().trim().max(320).optional() }).optional(),
-  /** Navigation section suggested by the agent ("Tab › Section" or a section title). */
-  section: z.string().trim().max(200).optional(),
+const aiDraftSchema = markdownPageSchema.extend({
   publishAt: z.string().trim().max(40).optional(),
   /** "draft" only creates it; "publish" and "schedule" are what the user clicked. */
   mode: z.enum(["draft", "publish", "schedule"]).default("draft"),
@@ -444,40 +253,17 @@ export async function createDraftFromProposal(
   if ("error" in user) return { ok: false, error: user.error };
   const parsed = aiDraftSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  const { title, description = "", content, mode, publishAt } = parsed.data;
+  const { mode, publishAt } = parsed.data;
   if (mode === "schedule") {
     const when = publishAt ? new Date(publishAt) : null;
     if (!when || Number.isNaN(when.getTime())) return { ok: false, error: "Tanggal jadwal tidak valid." };
     if (when.getTime() <= Date.now() + 30_000) return { ok: false, error: "Tanggal jadwal sudah lewat. Pilih Buat draf lalu jadwalkan dari editor." };
   }
 
-  const requested = parsed.data.slug ? slugSchema.safeParse(parsed.data.slug.replace(/^\/?docs\//, "")) : null;
-  const slug = await uniqueSlug(requested?.success ? requested.data : slugify(title));
-  const doc = mdxToDoc(content);
-  const seo = Object.fromEntries(Object.entries(parsed.data.seo ?? {}).filter(([, v]) => v));
-  const navSection = await resolveSection(parsed.data.section);
-  const [page] = await db
-    .insert(schema.pages)
-    .values({
-      slug,
-      title,
-      description,
-      content: doc,
-      seo,
-      draftTitle: title,
-      draftDescription: description,
-      draftContent: doc,
-      draftSeo: seo,
-      navSection,
-      authorId: user.id,
-      updatedById: user.id,
-    })
-    .returning({ id: schema.pages.id });
-  const draft = { title, description, content: doc, seo, cover: null };
-  await addRevision(page.id, draft, "ai", user.id);
-  if (mode === "draft") return { ok: true, id: page.id, slug, status: "draft" };
+  const page = await createPageFromMarkdown(parsed.data, user.id, "ai");
+  if (mode === "draft") return { ok: true, id: page.id, slug: page.slug, status: "draft" };
 
-  const result = await publishWorkingCopy(page.id, draft, mode === "schedule" ? (publishAt ?? null) : null, user.id);
+  const result = await publishWorkingCopy(page.id, page.draft, mode === "schedule" ? (publishAt ?? null) : null, user.id, updateTag);
   if (!result.ok) return { ok: false, error: `Draf dibuat, tetapi gagal diterbitkan: ${result.error}` };
   return { ok: true, id: page.id, slug: result.slug, status: result.status, publishedAt: result.publishedAt };
 }
