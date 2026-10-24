@@ -1,12 +1,30 @@
-# Production app on top of docker-compose.yml (PostgreSQL). HTTPS is done by your own reverse proxy,
+# Production app (PostgreSQL included). HTTPS is done by your own reverse proxy,
 # which forwards to APP_PORT on this host (see README → Produksi).
 # Use deploy/deploy.sh, which runs migrations before building. By hand:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d --build
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 # Settings: .env.production (see .env.production.example).
 
 x-database-url: &database-url postgres://docsku:${POSTGRES_PASSWORD}@postgres:5432/docsku
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: docsku
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: docsku
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Needed because `next build` (app → build.network: host) prerenders from the host-published DB.
+      - "127.0.0.1:5491:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docsku -d docsku"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   migrate:
     build:
       context: .
@@ -23,7 +41,7 @@ services:
     build:
       context: .
       target: runner
-      # `next build` prerenders pages from the database published on the host (docker-compose.yml).
+      # `next build` prerenders pages from the database published on the host.
       network: host
       args:
         DATABASE_URL: postgres://docsku:${POSTGRES_PASSWORD}@127.0.0.1:5491/docsku
@@ -47,3 +65,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+
+volumes:
+  postgres_data:
