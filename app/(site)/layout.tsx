@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { getNavigation, getSearchIndex, getSiteSettings } from "@/lib/data/site";
 import { SearchProvider } from "@/components/search";
 import { SiteProvider } from "@/components/site-context";
@@ -13,7 +14,9 @@ export default async function SiteLayout({ children }: LayoutProps<"/">) {
   return (
     <SiteProvider value={{ site, tabs }}>
       <SearchProvider index={searchIndex}>
-        <SiteHeader />
+        <Suspense>
+          <SiteHeader />
+        </Suspense>
         <div className="pt-(--header-h)">{children}</div>
       </SearchProvider>
     </SiteProvider>
