@@ -87,7 +87,7 @@ export function McpServers({ initial }: { initial: McpServerView[] }) {
             </Field>
             <Field
               label="Nilai header"
-              hint={editing?.headerNames.length ? `Tersimpan: ${editing.headerNames.join(", ")}. Kosongkan untuk mempertahankan.` : "Disimpan terenkripsi, tidak pernah ditampilkan lagi."}
+              hint={editing?.headerNames.length ? `Tersimpan: ${editing.headerNames.join(", ")}. Kosongkan untuk mempertahankan (hanya jika domain alamatnya tidak berubah).` : "Disimpan terenkripsi, tidak pernah ditampilkan lagi."}
             >
               <Input
                 type="password"

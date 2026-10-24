@@ -90,7 +90,9 @@ export async function saveMcpServer(input: McpServerForm): Promise<Result<{ serv
   const existing = form.id ? servers.find((s) => s.id === form.id) : undefined;
   if (form.id && !existing) return { ok: false, error: "Server tidak ditemukan." };
 
-  let headers = existing && !form.clearHeaders ? decryptHeaders(existing) : {};
+  // Stored secrets only go back to the origin they were entered for; a changed URL must re-enter them.
+  const sameOrigin = existing && new URL(existing.url).origin === new URL(form.url).origin;
+  let headers = sameOrigin && !form.clearHeaders ? decryptHeaders(existing) : {};
   if (form.headerName && form.headerValue) {
     if (!canEncrypt()) return { ok: false, error: "ENCRYPTION_KEY belum diatur, jadi header rahasia tidak bisa disimpan." };
     headers = { ...headers, [form.headerName]: form.headerValue };
