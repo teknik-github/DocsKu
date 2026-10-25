@@ -4,6 +4,7 @@ import { createContext, use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CornerDownLeft, FileText, Hash, Search } from "lucide-react";
 import type { SearchEntry } from "@/lib/site-types";
+import { beacon } from "@/components/reader-footer";
 
 type Result = {
   href: string;
@@ -13,6 +14,18 @@ type Result = {
 };
 
 const SearchContext = createContext<() => void>(() => {});
+
+type PendingQuery = { query: string; found: boolean } | null;
+
+/** Reports a finished query once per dialog, so the dashboard can list searches that found nothing. */
+function reportQuery(pending: { current: PendingQuery }, reported: Set<string>) {
+  const item = pending.current;
+  pending.current = null;
+  const query = item?.query.toLowerCase().replace(/\s+/g, " ").trim() ?? "";
+  if (!item || query.length < 2 || query.length > 100 || reported.has(query)) return;
+  reported.add(query);
+  beacon("/api/track", { type: "search", query, found: item.found });
+}
 
 function search(index: SearchEntry[], query: string): Result[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -85,6 +98,19 @@ function SearchDialog({ index, onClose }: { index: SearchEntry[]; onClose: () =>
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
   const results = search(index, query);
+  const pending = useRef<PendingQuery>(null);
+  const reported = useRef(new Set<string>());
+
+  // A query counts once typing pauses for 1.5 s, or when the dialog closes.
+  useEffect(() => {
+    pending.current = query.trim() ? { query, found: search(index, query).length > 0 } : null;
+    const timer = setTimeout(() => reportQuery(pending, reported.current), 1500);
+    return () => clearTimeout(timer);
+  }, [index, query]);
+  useEffect(() => {
+    const seen = reported.current;
+    return () => reportQuery(pending, seen);
+  }, []);
 
   useEffect(() => {
     listRef.current

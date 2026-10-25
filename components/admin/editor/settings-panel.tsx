@@ -134,7 +134,7 @@ export function SettingsPanel({
           {saved && <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">URL disimpan.</p>}
           {status === "published" && value !== slug && (
             <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-              Halaman ini sudah terbit. Tautan lama tidak akan berfungsi lagi.
+              Halaman ini sudah terbit. Alamat lama akan dialihkan otomatis ke alamat baru.
             </p>
           )}
           <div className="mt-2 flex gap-2">

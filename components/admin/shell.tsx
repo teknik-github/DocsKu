@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  ChartColumn,
   ExternalLink,
   FileText,
   House,
@@ -13,6 +14,7 @@ import {
   MessageSquareText,
   Palette,
   Plug,
+  Signpost,
   LogOut,
   Menu,
   Settings,
@@ -29,9 +31,11 @@ const NAV = [
   { href: "/admin/home", label: "Beranda", icon: House },
   { href: "/admin/pages", label: "Halaman", icon: FileText },
   { href: "/admin/ai", label: "AI Chat", icon: MessageSquareText },
+  { href: "/admin/stats", label: "Statistik", icon: ChartColumn },
   { href: "/admin/mcp", label: "MCP", icon: Plug },
   { href: "/admin/media", label: "Media", icon: ImageIcon },
   { href: "/admin/navigation", label: "Navigasi", icon: ListTree, adminOnly: true },
+  { href: "/admin/redirects", label: "Redirect", icon: Signpost, adminOnly: true },
   { href: "/admin/users", label: "Pengguna", icon: Users, adminOnly: true },
   { href: "/admin/theme", label: "Tema", icon: Palette, adminOnly: true },
   { href: "/admin/settings", label: "Pengaturan", icon: Settings, adminOnly: true },
@@ -39,7 +43,7 @@ const NAV = [
 
 const ROLE_LABEL = { admin: "Admin", editor: "Editor" };
 
-function SidebarContent({ user, onNavigate }: { user: SessionUser; onNavigate?: () => void }) {
+function SidebarContent({ user, updateAvailable, onNavigate }: { user: SessionUser; updateAvailable?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
     <>
@@ -61,6 +65,9 @@ function SidebarContent({ user, onNavigate }: { user: SessionUser; onNavigate?: 
             >
               <item.icon className="size-4" />
               {item.label}
+              {updateAvailable && item.href === "/admin/settings" && (
+                <span className="ml-auto size-2 rounded-full bg-accent" title="Versi baru Docsku tersedia" aria-label="Versi baru tersedia" />
+              )}
             </Link>
           );
         })}
@@ -104,13 +111,13 @@ function SidebarContent({ user, onNavigate }: { user: SessionUser; onNavigate?: 
 /** Dashboard pages that use the full width and height instead of the centered column. */
 const FULL_BLEED = ["/admin/ai"];
 
-export function AdminShell({ user, children }: { user: SessionUser; children: React.ReactNode }) {
+export function AdminShell({ user, updateAvailable, children }: { user: SessionUser; updateAvailable?: boolean; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const fullBleed = FULL_BLEED.includes(usePathname());
   return (
     <div className="min-h-screen">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-line bg-page lg:flex">
-        <SidebarContent user={user} />
+        <SidebarContent user={user} updateAvailable={updateAvailable} />
       </aside>
 
       <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-page/90 px-4 backdrop-blur lg:hidden">
@@ -137,7 +144,7 @@ export function AdminShell({ user, children }: { user: SessionUser; children: Re
             >
               <X className="size-4.5" />
             </button>
-            <SidebarContent user={user} onNavigate={() => setOpen(false)} />
+            <SidebarContent user={user} updateAvailable={updateAvailable} onNavigate={() => setOpen(false)} />
           </aside>
         </div>
       )}

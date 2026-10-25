@@ -62,11 +62,14 @@ export function HybridArticle({
   tabs,
   cards,
   banner,
+  footer,
 }: {
   article: ArticleData;
   tabs: NavTab[];
   cards: Map<string, PageCard>;
   banner?: React.ReactNode;
+  /** Shown after the content on the public site (reader feedback); left out in previews. */
+  footer?: React.ReactNode;
 }) {
   const place = locate(tabs, article.href);
   const { prev, next } = getPager(tabs, article.href);
@@ -113,6 +116,7 @@ export function HybridArticle({
           <div className="prose-docs">
             <RenderDoc doc={article.doc} />
           </div>
+          {footer}
 
           {(prev || next) && (
             <nav aria-label="Navigasi halaman" className="mt-16 grid gap-4 sm:grid-cols-2">
@@ -162,11 +166,14 @@ export function GhostArticle({
   tabs,
   cards,
   banner,
+  footer,
 }: {
   article: ArticleData;
   tabs: NavTab[];
   cards: Map<string, PageCard>;
   banner?: React.ReactNode;
+  /** Shown after the content on the public site (reader feedback); left out in previews. */
+  footer?: React.ReactNode;
 }) {
   const place = locate(tabs, article.href);
   const pages = allPages(tabs);
@@ -203,6 +210,7 @@ export function GhostArticle({
         <div className="prose-docs prose-reading mx-auto mt-14 max-w-[44rem] px-5 sm:px-8">
           <RenderDoc doc={article.doc} />
         </div>
+        {footer && <div className="mx-auto max-w-[44rem] px-5 sm:px-8">{footer}</div>}
       </article>
 
       {more.length > 0 && (

@@ -18,6 +18,7 @@ export function DocArticle({
   prev,
   next,
   banner,
+  footer,
 }: {
   title: string;
   description: string;
@@ -26,6 +27,8 @@ export function DocArticle({
   prev?: NavLink;
   next?: NavLink;
   banner?: React.ReactNode;
+  /** Shown after the content on the public site (reader feedback); left out in previews. */
+  footer?: React.ReactNode;
 }) {
   const markdown = `# ${title}\n\n${description ? `${description}\n\n` : ""}${toMarkdown(doc)}`;
 
@@ -46,6 +49,7 @@ export function DocArticle({
           <div className="prose-docs">
             <RenderDoc doc={doc} />
           </div>
+          {footer}
 
           {(prev || next) && (
             <nav aria-label="Navigasi halaman" className="mt-16 grid gap-4 sm:grid-cols-2">

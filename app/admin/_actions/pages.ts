@@ -9,6 +9,7 @@ import { authorize } from "@/lib/auth/dal";
 import { EMPTY_DOC } from "@/lib/content/doc";
 import { PLACEHOLDER_SLUG, slugify, uniqueSlug } from "@/lib/slug";
 import { NO_NAV, resolveSection } from "@/lib/automation";
+import { forgetRedirects, recordSlugChange } from "@/lib/redirects";
 import {
   NOT_FOUND,
   addRevision,
@@ -31,6 +32,7 @@ const isId = (id: unknown): id is string => z.uuid().safeParse(id).success;
 /** Pages, navigation, and search all derive from published pages. */
 function refreshPublicSite() {
   updateTag("pages");
+  forgetRedirects();
 }
 
 export async function createPage() {
@@ -131,12 +133,19 @@ export async function updateSlug(pageId: string, value: string): Promise<{ ok: t
     .from(schema.pages)
     .where(and(eq(schema.pages.slug, parsed.data), ne(schema.pages.id, pageId)));
   if (taken) return { ok: false, error: "Slug ini sudah dipakai halaman lain." };
+  const [before] = await db
+    .select({ slug: schema.pages.slug, publishedAt: schema.pages.publishedAt })
+    .from(schema.pages)
+    .where(and(eq(schema.pages.id, pageId), eq(schema.pages.kind, "doc")));
+  if (!before) return { ok: false, error: "Halaman tidak ditemukan." };
   const [page] = await db
     .update(schema.pages)
     .set({ slug: parsed.data, updatedById: user.id })
-    .where(and(eq(schema.pages.id, pageId), eq(schema.pages.kind, "doc")))
+    .where(eq(schema.pages.id, pageId))
     .returning({ status: schema.pages.status });
-  if (!page) return { ok: false, error: "Halaman tidak ditemukan." };
+  // Only an address that was ever public needs to keep working.
+  if (before.publishedAt && before.publishedAt <= new Date()) await recordSlugChange(pageId, before.slug, parsed.data);
+  else forgetRedirects();
   if (page.status === "published") refreshPublicSite();
   return { ok: true, slug: parsed.data };
 }

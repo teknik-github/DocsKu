@@ -3,6 +3,7 @@ import { revalidateTag } from "next/cache";
 import { and, eq, lte, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { addToNavigation, readAutomation } from "@/lib/automation";
+import { forgetRedirects } from "@/lib/redirects";
 
 function authorized(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -66,7 +67,10 @@ export async function POST(request: Request) {
   }
 
   // Make the new pages visible right away rather than on the next background refresh.
-  if (published.length) revalidateTag("pages", { expire: 0 });
+  if (published.length) {
+    revalidateTag("pages", { expire: 0 });
+    forgetRedirects();
+  }
   if (navigationChanged) revalidateTag("navigation", { expire: 0 });
   return Response.json({ published: published.length });
 }

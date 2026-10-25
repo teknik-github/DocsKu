@@ -14,6 +14,7 @@ import {
 import { GhostArticle, HybridArticle } from "@/components/publication/articles";
 import { findPage, getPager, slugToHref } from "@/lib/navigation";
 import { DocArticle, DocSkeleton } from "@/components/doc-article";
+import { ReaderFooter } from "@/components/reader-footer";
 import { pageMetadata } from "@/lib/seo";
 
 export async function generateStaticParams() {
@@ -50,6 +51,7 @@ async function DocContent({ params }: Pick<PageProps<"/docs/[...slug]">, "params
   if (!page) notFound();
 
   const href = slugToHref(page.slug);
+  const footer = <ReaderFooter slug={page.slug} />;
   const layout = site.layout ?? "docs";
   if (layout !== "docs") {
     const cards = new Map((await getPageCards()).map((card) => [card.href, card]));
@@ -64,9 +66,9 @@ async function DocContent({ params }: Pick<PageProps<"/docs/[...slug]">, "params
       readingMinutes: readingMinutes(page.content),
     };
     return layout === "ghost" ? (
-      <GhostArticle article={article} tabs={tabs} cards={cards} />
+      <GhostArticle article={article} tabs={tabs} cards={cards} footer={footer} />
     ) : (
-      <HybridArticle article={article} tabs={tabs} cards={cards} />
+      <HybridArticle article={article} tabs={tabs} cards={cards} footer={footer} />
     );
   }
   const { prev, next } = getPager(tabs, href);
@@ -78,6 +80,7 @@ async function DocContent({ params }: Pick<PageProps<"/docs/[...slug]">, "params
       doc={page.content}
       prev={prev}
       next={next}
+      footer={footer}
     />
   );
 }

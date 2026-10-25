@@ -5,7 +5,7 @@ Situs dokumentasi bergaya [platform.claude.com/docs](https://platform.claude.com
 ## Fitur
 
 - Situs dokumentasi: tab header, sidebar, daftar isi otomatis, pencarian (Ctrl+K), mode gelap, blok kode berwarna, dan tiga tema tampilan yang bisa dipilih.
-- Dashboard `/admin`: editor blok (menu `/`), simpan otomatis, terbit/perbarui/jadwalkan, pratinjau draf, riwayat revisi, unggah gambar, navigasi, pengaturan situs.
+- Dashboard `/admin`: editor blok (menu `/`), simpan otomatis, terbit/perbarui/jadwalkan, pratinjau draf, riwayat revisi, unggah gambar, navigasi, redirect, statistik pembaca, pengaturan situs, dan pemberitahuan versi baru.
 - Pengguna dengan peran **Admin** (semua akses) dan **Editor** (halaman dan media).
 
 ## Menjalankan
@@ -84,6 +84,16 @@ Klien hanya melihat tool yang diizinkan tokennya. Token bertindak atas nama pemi
 
 **AI Chat memakai server MCP lain** (khusus admin). Tambahkan alamat server MCP jarak jauh (Streamable HTTP) beserta header login bila perlu (disimpan terenkripsi). Docsku mengambil daftar tool-nya, lalu Anda memilih tool mana yang boleh dipakai agen. Tool yang ditandai server sebagai baca saja langsung aktif; tool yang bisa mengubah sesuatu harus diaktifkan manual.
 
+## Redirect
+
+Saat slug halaman yang sudah terbit diubah, alamat lamanya otomatis dialihkan (308) ke halaman itu. Pengalihan ini ikut slug terbaru, jadi tidak ada rantai redirect. Redirect manual (path di bawah `/docs` ke halaman, path lain, atau URL luar) dikelola admin di **Redirect** (`/admin/redirects`), lengkap dengan jumlah pemakaian. Halaman yang terbit selalu menang atas redirect dari alamatnya sendiri.
+
+## Statistik dan umpan balik pembaca
+
+Setiap artikel menghitung kunjungan (sekali per tab, tanpa cookie, tanpa menyimpan IP; bot dan orang yang sedang masuk ke dashboard tidak dihitung) dan diakhiri pertanyaan "Apakah halaman ini membantu?" 👍/👎 dengan pesan opsional. Pesan itu hanya terlihat di dashboard, tidak tampil di situs. Pencarian situs juga dicatat, termasuk kata kunci yang tidak menemukan hasil.
+
+Semuanya terlihat di **Statistik** (`/admin/stats`): kunjungan 7/30/90 hari, halaman terpopuler beserta persentase "membantu", daftar umpan balik (tandai selesai atau hapus), pencarian teratas, dan pencarian tanpa hasil.
+
 ## SEO
 
 Panel **Pengaturan halaman** di editor berisi meta title, meta description, gambar pratinjau sosial (Open Graph), dan noindex, lengkap dengan pratinjau hasil pencarian. Isi `SITE_URL` di `.env.local` (mis. `https://docs.contoh.com`) agar gambar pratinjau sosial memakai alamat lengkap.
@@ -116,6 +126,18 @@ Aplikasi berjalan di container (`Dockerfile`, `docker-compose.prod.yml`) di atas
 
 `pnpm prod:logs` menampilkan log aplikasi, `pnpm prod:stop` menghentikannya. Cek kesehatan: `GET /api/health`.
 
+### Pembaruan versi
+
+**Pengaturan → Pembaruan Docsku** menampilkan versi terpasang dan memeriksa rilis di GitHub (paling sering tiap 12 jam, atau lewat tombol "Periksa sekarang"). Kalau ada versi baru, dashboard menampilkan catatan rilisnya, perintah update yang tinggal disalin, dan titik di menu Pengaturan. Dashboard tidak memasang apa pun sendiri; update tetap dijalankan di server:
+
+```sh
+git fetch --tags origin && git checkout vX.Y.Z && pnpm prod:deploy
+```
+
+Karena repositori DocsKu private, isi token GitHub (fine-grained, akses *Contents: Read-only* ke repositori ini) di bagian **Sumber pembaruan**, atau lewat `UPDATE_GITHUB_TOKEN` di `.env.production`. Token disimpan terenkripsi dan otomatis dihapus kalau repositorinya diganti.
+
+Untuk merilis versi baru dari mesin pengembangan: `pnpm release 0.2.0`. Skrip ini (`deploy/release.sh`) memeriksa bahwa `main` bersih dan sudah di-push, menaikkan versi di `package.json`, membuat commit dan tag `v0.2.0`, mendorongnya, lalu membuat GitHub release (lewat `gh`) dengan daftar commit sejak rilis sebelumnya sebagai catatan.
+
 Catatan:
 
 - Aplikasi hanya mendengar di `127.0.0.1` dan memercayai header `X-Forwarded-*` (`TRUST_PROXY=1`). Jangan buka port-nya langsung ke internet.
@@ -137,6 +159,7 @@ Catatan:
 | `pnpm db:studio` | Drizzle Studio untuk melihat isi database |
 | `pnpm prod:deploy` | Migrasi, build, dan jalankan versi produksi di Docker |
 | `pnpm prod:logs` / `pnpm prod:stop` | Log / hentikan aplikasi produksi |
+| `pnpm release <versi>` | Menaikkan versi, membuat tag, dan GitHub release |
 
 ## Catatan
 

@@ -6,6 +6,7 @@ import { db, schema } from "@/db";
 import { mdxToDoc } from "@/lib/content/mdx-to-doc";
 import { slugify, uniqueSlug } from "@/lib/slug";
 import { addToNavigation, prepareForPublish, readAutomation, resolveSection, type Filled } from "@/lib/automation";
+import { forgetRedirects } from "@/lib/redirects";
 
 /**
  * Page operations shared by the dashboard's server actions and the MCP
@@ -195,6 +196,7 @@ export async function publishWorkingCopy(
   await addRevision(pageId, draft, status === "published" ? "publish" : "schedule", userId);
   if (status === "published") {
     invalidate("pages");
+    forgetRedirects();
     if (page.kind === "doc" && firstPublish && settings.navigation) {
       const added = await addToNavigation(pageId, navSection);
       if (added) {
@@ -223,6 +225,7 @@ export async function unpublish(pageId: string, userId: string, invalidate: Inva
     .returning({ updatedAt: schema.pages.updatedAt });
   if (!page) return { ok: false as const, error: NOT_FOUND };
   invalidate("pages");
+  forgetRedirects();
   return { ok: true as const, savedAt: page.updatedAt.toISOString(), hasChanges: false };
 }
 

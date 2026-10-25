@@ -3,11 +3,13 @@ import { sql } from "drizzle-orm";
 import type { PageSeo } from "@/lib/site-types";
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -195,3 +197,67 @@ export const apiTokens = pgTable(
 );
 
 export type ApiToken = typeof apiTokens.$inferSelect;
+
+/**
+ * Redirects for /docs paths (`fromPath` is the slug without "/docs/"). Automatic
+ * ones are recorded when a published page's slug changes and point at the page,
+ * so they always follow its current slug; manual ones point at `toUrl`.
+ * Served by proxy.ts (lib/redirects.ts) only when no published page owns the path.
+ */
+export const redirects = pgTable("redirects", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fromPath: text("from_path").notNull().unique(),
+  pageId: uuid("page_id").references(() => pages.id, { onDelete: "cascade" }),
+  /** A site path ("/docs/…") or an absolute http(s) URL, for manual redirects. */
+  toUrl: text("to_url"),
+  auto: boolean("auto").notNull().default(false),
+  hits: integer("hits").notNull().default(0),
+  lastHitAt: timestamp("last_hit_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Redirect = typeof redirects.$inferSelect;
+
+/** Views per published page per day (Asia/Jakarta date), counted without cookies. */
+export const pageViews = pgTable(
+  "page_views",
+  {
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    views: integer("views").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.pageId, t.day] }), index("page_views_day_idx").on(t.day)],
+);
+
+/** "Was this page helpful?" answers from readers, with an optional message seen only in the dashboard. */
+export const pageFeedback = pgTable(
+  "page_feedback",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    helpful: boolean("helpful").notNull(),
+    comment: text("comment"),
+    /** Marked done by an editor in the dashboard. */
+    resolved: boolean("resolved").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("page_feedback_page_idx").on(t.pageId, t.createdAt), index("page_feedback_created_idx").on(t.createdAt)],
+);
+
+export type PageFeedback = typeof pageFeedback.$inferSelect;
+
+/** Site search queries per day (normalised, lower-case), and how many found nothing. */
+export const searchQueries = pgTable(
+  "search_queries",
+  {
+    query: text("query").notNull(),
+    day: date("day").notNull(),
+    searches: integer("searches").notNull().default(0),
+    misses: integer("misses").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.query, t.day] }), index("search_queries_day_idx").on(t.day)],
+);

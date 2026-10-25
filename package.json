@@ -13,6 +13,7 @@
     "db:seed": "tsx db/seed/run.mts",
     "db:studio": "drizzle-kit studio",
     "prod:deploy": "sh deploy/deploy.sh",
+    "release": "sh deploy/release.sh",
     "prod:logs": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production logs -f app",
     "prod:stop": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production stop app"
   },
