@@ -10,6 +10,8 @@ import { toMarkdown } from "@/lib/content/markdown";
 import type { NavigationData, NavItemData, PageSeo } from "@/lib/site-types";
 import type { AgentEvent, CurrentPage, Proposal } from "@/lib/ai/chat-types";
 import { callExternalTool, externalAgentTools, type ExternalTools } from "@/lib/mcp/external";
+import { partialStringFields } from "@/lib/ai/partial-json";
+import { pageWritingGuide } from "@/lib/ai/writing-guide";
 
 export type { AgentEvent, CurrentPage, Proposal };
 
@@ -21,6 +23,11 @@ export type { AgentEvent, CurrentPage, Proposal };
 
 const MAX_TURNS = 6;
 const MAX_CONTENT = 60_000;
+/** Proposal tools whose arguments are shown live while the model writes them. */
+const DRAFTED: Record<string, Proposal["kind"]> = { propose_new_page: "new", propose_page_edit: "edit" };
+/** At most one draft event per tool call per this many ms. */
+const DRAFT_EVERY_MS = 120;
+const WRITING_GUIDE = pageWritingGuide(true);
 
 export const COMPONENTS = `Komponen yang bisa dipakai di isi halaman (tulis persis seperti ini, tiap tag di barisnya sendiri):
 - Callout: <Note>…</Note>, <Info>…</Info>, <Tip>…</Tip>, <Check>…</Check>, <Warning>…</Warning>, <Danger>…</Danger> (opsional title="…")
@@ -89,6 +96,8 @@ ${
     : ""
 }${hasPage ? "- Pesan terakhir pengguna diawali [Konteks] berisi keadaan terbaru halaman di editor; itu yang berlaku, bukan versi di pesan lama." : "- Tidak ada halaman yang sedang dibuka. Untuk tulisan baru, gunakan propose_new_page."}
 
+${WRITING_GUIDE}
+
 ${COMPONENTS}${
     summary
       ? `
@@ -148,7 +157,7 @@ function toolSpecs(hasPage: boolean): ToolSpec[] {
             title: { type: "string" },
             description: { type: "string", description: "Satu kalimat ringkasan yang tampil di bawah judul." },
             slug: { type: "string", description: "Opsional, mis. panduan/instalasi" },
-            content: { type: "string", description: "Isi halaman dalam Markdown (boleh memakai komponen)." },
+            content: { type: "string", description: "Isi halaman lengkap dalam Markdown (boleh memakai komponen), mengikuti Panduan menulis isi halaman." },
             seo: seoParams,
             section: { type: "string", description: "Bagian navigasi tujuan, \"Tab › Section\" seperti di get_site_structure." },
             publish_at: { type: "string", description: "Opsional: usulan waktu terbit (ISO 8601 dengan zona waktu) untuk jadwal konten." },
@@ -170,7 +179,7 @@ function toolSpecs(hasPage: boolean): ToolSpec[] {
           properties: {
             title: { type: "string" },
             description: { type: "string" },
-            content: { type: "string", description: "Markdown untuk isi halaman." },
+            content: { type: "string", description: "Markdown untuk isi halaman, mengikuti Panduan menulis isi halaman." },
             content_mode: { type: "string", enum: ["replace", "append"], description: "replace = ganti seluruh isi, append = tambahkan di akhir." },
             seo: seoParams,
             note: { type: "string", description: "Penjelasan singkat perubahan." },
@@ -225,11 +234,19 @@ async function runTool(
   page: CurrentPage | null,
   external: ExternalTools,
   signal: AbortSignal,
+  truncated = false,
 ): Promise<{ result: string; proposal?: Proposal; label: string }> {
   let args: unknown;
   try {
     args = rawArgs ? JSON.parse(rawArgs) : {};
   } catch {
+    if (truncated) {
+      return {
+        result:
+          "Argumen terpotong karena jawaban mencapai batas token. Kirim ulang usulan dengan isi yang lebih ringkas (sekitar 1.200 kata), atau bagi menjadi beberapa halaman.",
+        label: "Usulan terpotong (batas token)",
+      };
+    }
     return { result: "Argumen tool bukan JSON yang valid.", label: "Kesalahan argumen" };
   }
 
@@ -377,6 +394,27 @@ export async function runAgent({
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     let end: Extract<AgentPart, { type: "end" }> | undefined;
+    // Proposals being written this turn, by tool-call index: what the client has already been sent.
+    const drafts = new Map<number, { key: string; at: number; title?: string; description?: string; sent: number }>();
+    const sendDraft = (index: number, name: string, args: string, force = false) => {
+      const kind = DRAFTED[name];
+      if (!kind) return;
+      let draft = drafts.get(index);
+      if (!draft) drafts.set(index, (draft = { key: `${turn}:${index}`, at: 0, sent: 0 }));
+      const now = Date.now();
+      if (!force && now - draft.at < DRAFT_EVERY_MS) return;
+      const fields = partialStringFields(args);
+      const content = fields.content ?? "";
+      const event: Extract<AgentEvent, { t: "draft" }> = { t: "draft", key: draft.key, kind };
+      if (fields.title && fields.title !== draft.title) event.title = draft.title = fields.title;
+      if (fields.description && fields.description !== draft.description) event.description = draft.description = fields.description;
+      if (content.length > draft.sent) {
+        event.content = content.slice(draft.sent);
+        draft.sent = content.length;
+      }
+      draft.at = now;
+      if (event.title !== undefined || event.description !== undefined || event.content !== undefined || force) emit(event);
+    };
     for await (const part of streamAgentTurn(config, messages, tools, { maxTokens: Math.max(config.maxTokens, 8000), signal })) {
       if (part.type === "reasoning") {
         if (!thinking) emit({ t: "thinking" });
@@ -386,10 +424,15 @@ export async function runAgent({
         emit({ t: "text", v: part.text });
       } else if (part.type === "usage") {
         usage = addUsage(usage, part.usage);
+      } else if (part.type === "tool_progress") {
+        thinking = false;
+        sendDraft(part.index, part.name, part.arguments);
       } else if (part.type === "end") {
         end = part;
       }
     }
+    // Send the rest of each draft before its tool runs.
+    if (!signal.aborted) end?.toolCalls.forEach((call, index) => drafts.has(index) && sendDraft(index, call.name, call.arguments, true));
     if (!end || end.toolCalls.length === 0 || signal.aborted) {
       reportUsage();
       return;
@@ -402,10 +445,14 @@ export async function runAgent({
       // DeepSeek needs its reasoning passed back during tool use in thinking mode.
       ...(config.provider === "deepseek" && config.thinking && end.reasoning ? { reasoning_content: end.reasoning } : {}),
     });
-    for (const call of end.toolCalls) {
-      const { result, proposal, label } = await runTool(call.name, call.arguments, page, external, signal);
+    for (const [index, call] of end.toolCalls.entries()) {
+      // Only the last call can have been cut off by max_tokens.
+      const cut = end.truncated && index === end.toolCalls.length - 1;
+      const { result, proposal, label } = await runTool(call.name, call.arguments, page, external, signal, cut);
       emit({ t: "tool", label });
       if (proposal) emit({ t: "proposal", proposal });
+      const draft = drafts.get(index);
+      if (draft) emit({ t: "draft_end", key: draft.key });
       messages.push({ role: "tool", tool_call_id: call.id, content: result });
     }
   }

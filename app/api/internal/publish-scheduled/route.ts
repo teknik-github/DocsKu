@@ -1,23 +1,16 @@
-import { timingSafeEqual } from "node:crypto";
 import { revalidateTag } from "next/cache";
 import { and, eq, lte, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { addToNavigation, readAutomation } from "@/lib/automation";
+import { authorizedInternal } from "@/lib/internal-auth";
 import { forgetRedirects } from "@/lib/redirects";
-
-function authorized(request: Request) {
-  const secret = process.env.CRON_SECRET;
-  const given = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-  if (!secret || given.length !== secret.length) return false;
-  return timingSafeEqual(Buffer.from(given), Buffer.from(secret));
-}
 
 /**
  * Publishes scheduled pages whose time has come. Called every minute by
  * instrumentation.ts; can also be hit by an external cron with the secret.
  */
 export async function POST(request: Request) {
-  if (!authorized(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!authorizedInternal(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const published = await db.transaction(async (tx) => {
     const due = await tx

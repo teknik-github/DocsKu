@@ -83,5 +83,12 @@ export type AgentEvent =
   | { t: "thinking" }
   | { t: "tool"; label: string }
   | { t: "proposal"; proposal: Proposal }
+  /**
+   * A proposal being written, while the model streams the tool call. Live only, never stored.
+   * `key` names the draft within the reply; `content` is the new part of the body since the last event.
+   */
+  | { t: "draft"; key: string; kind: Proposal["kind"]; title?: string; description?: string; content?: string }
+  /** The tool call behind a draft finished (the proposal event, if valid, came just before). */
+  | { t: "draft_end"; key: string }
   | { t: "usage"; usage: { input: number; cached: number; output: number } }
   | { t: "error"; v: string };

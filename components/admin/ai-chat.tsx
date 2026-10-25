@@ -37,6 +37,8 @@ import type { AgentEvent, ChatMessage, ConversationListItem, CurrentPage, Propos
 
 type Assistant = Extract<ChatMessage, { role: "assistant" }>;
 type ApplyMode = "draft" | "publish" | "schedule";
+/** A proposal the agent is still writing (live from the stream, never stored). */
+type Draft = { key: string; kind: Proposal["kind"]; title?: string; description?: string; content: string };
 
 const STARTERS = {
   page: [
@@ -85,6 +87,7 @@ export function AiChat({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const [drafts, setDrafts] = useState<Draft[]>([]);
   const [notice, setNotice] = useState("");
   const abort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -137,7 +140,7 @@ export function AiChat({
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
+  }, [messages, drafts]);
 
   const updateReply = (fn: (m: Assistant) => Assistant) =>
     setMessages((list) => {
@@ -201,6 +204,23 @@ export function AiChat({
           case "proposal":
             updateReply((m) => ({ ...m, proposals: [...m.proposals, event.proposal] }));
             break;
+          case "draft":
+            setThinking(false);
+            setDrafts((list) => {
+              const found = list.find((d) => d.key === event.key);
+              const base = found ?? { key: event.key, kind: event.kind, content: "" };
+              const next = {
+                ...base,
+                title: event.title ?? base.title,
+                description: event.description ?? base.description,
+                content: base.content + (event.content ?? ""),
+              };
+              return found ? list.map((d) => (d === found ? next : d)) : [...list, next];
+            });
+            break;
+          case "draft_end":
+            setDrafts((list) => list.filter((d) => d.key !== event.key));
+            break;
           case "usage":
             updateReply((m) => ({ ...m, usage: event.usage }));
             break;
@@ -212,6 +232,8 @@ export function AiChat({
     } catch (e) {
       if (!controller.signal.aborted) updateReply((m) => ({ ...m, error: (e as Error).message }));
     } finally {
+      // A draft whose tool call never finished (stream cut, stopped) must not linger.
+      setDrafts([]);
       setBusy(false);
       setThinking(false);
       void refreshList();
@@ -400,6 +422,7 @@ export function AiChat({
                     onDismiss={() => void setProposal(message.id, proposal.id, { status: "dismissed" })}
                   />
                 ))}
+                {busy && i === messages.length - 1 && drafts.map((draft) => <DraftCard key={draft.key} draft={draft} />)}
                 {!(busy && i === messages.length - 1) && <ApplyAll message={message} onApplyAll={() => applyAll(message)} />}
                 {message.error && <p className="text-sm text-red-600 dark:text-red-400">{message.error}</p>}
                 {message.usage && (
@@ -670,6 +693,60 @@ const DONE: Record<NonNullable<ProposalState["pageStatus"]>, string> = {
   published: "Dibuat dan diterbitkan.",
   scheduled: "Dibuat dan dijadwalkan.",
 };
+
+const COMPONENT_TAG = /<\/?(Note|Info|Tip|Check|Warning|Danger|CardGroup|Card|Steps|Step|Tabs|Tab|CodeGroup|Accordion)\b([^>]*)>/g;
+
+/**
+ * The chat renderer escapes HTML, so MDX component tags would show as text.
+ * For the live preview, turn them into plain Markdown: a titled opening tag
+ * becomes a bold line, the rest disappear, and the indentation used inside
+ * components is removed so it doesn't read as an indented code block.
+ */
+function previewMarkdown(source: string) {
+  let depth = 0;
+  return source
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      const tagsOnly = trimmed !== "" && trimmed.replace(COMPONENT_TAG, "").trim() === "";
+      const opens = [...trimmed.matchAll(COMPONENT_TAG)];
+      const indent = "  ".repeat(depth);
+      const text = line.startsWith(indent) ? line.slice(indent.length) : line.trimStart();
+      for (const tag of opens) {
+        if (tag[0].startsWith("</")) depth = Math.max(0, depth - 1);
+        else if (!tag[0].endsWith("/>")) depth++;
+      }
+      // Single-line components (<Tip>Teks</Tip>) keep their text.
+      const out = text.replace(COMPONENT_TAG, (_, _name, attrs: string) => {
+        const title = /title="([^"]*)"/.exec(attrs)?.[1];
+        return title ? `**${title}** ` : "";
+      });
+      return tagsOnly && out.trim() === "" ? "" : out;
+    })
+    .join("\n");
+}
+
+function DraftCard({ draft }: { draft: Draft }) {
+  const Icon = draft.kind === "new" ? FilePlus2 : PencilLine;
+  return (
+    <div className="rounded-xl border border-dashed border-accent/50 bg-accent-soft/20 p-3" data-testid="proposal-draft">
+      <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-accent">
+        <Icon className="size-3.5" />
+        {draft.kind === "new" ? "Menulis halaman baru…" : "Menulis perubahan…"}
+        <Loader2 className="size-3 animate-spin" />
+      </p>
+      {draft.title && <p className="text-sm font-semibold text-fg">{draft.title}</p>}
+      {draft.description && <p className="mt-0.5 text-xs text-fg-muted">{draft.description}</p>}
+      {draft.content && (
+        <div
+          className="chat-prose mt-2 border-t border-line pt-2 text-sm leading-relaxed text-fg"
+          dangerouslySetInnerHTML={{ __html: renderChatMarkdown(previewMarkdown(draft.content)) }}
+        />
+      )}
+      <p className="mt-2 text-[10px] text-fg-subtle">{draft.content.length} karakter · sedang menulis…</p>
+    </div>
+  );
+}
 
 function ProposalCard({
   proposal,

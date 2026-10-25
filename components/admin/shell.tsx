@@ -11,6 +11,7 @@ import {
   Image as ImageIcon,
   LayoutDashboard,
   ListTree,
+  MessageSquare,
   MessageSquareText,
   Palette,
   Plug,
@@ -32,6 +33,7 @@ const NAV = [
   { href: "/admin/pages", label: "Halaman", icon: FileText },
   { href: "/admin/ai", label: "AI Chat", icon: MessageSquareText },
   { href: "/admin/stats", label: "Statistik", icon: ChartColumn },
+  { href: "/admin/comments", label: "Komentar", icon: MessageSquare },
   { href: "/admin/mcp", label: "MCP", icon: Plug },
   { href: "/admin/media", label: "Media", icon: ImageIcon },
   { href: "/admin/navigation", label: "Navigasi", icon: ListTree, adminOnly: true },
@@ -43,7 +45,7 @@ const NAV = [
 
 const ROLE_LABEL = { admin: "Admin", editor: "Editor" };
 
-function SidebarContent({ user, updateAvailable, onNavigate }: { user: SessionUser; updateAvailable?: boolean; onNavigate?: () => void }) {
+function SidebarContent({ user, onNavigate }: { user: SessionUser; onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
     <>
@@ -65,9 +67,6 @@ function SidebarContent({ user, updateAvailable, onNavigate }: { user: SessionUs
             >
               <item.icon className="size-4" />
               {item.label}
-              {updateAvailable && item.href === "/admin/settings" && (
-                <span className="ml-auto size-2 rounded-full bg-accent" title="Versi baru Docsku tersedia" aria-label="Versi baru tersedia" />
-              )}
             </Link>
           );
         })}
@@ -111,13 +110,13 @@ function SidebarContent({ user, updateAvailable, onNavigate }: { user: SessionUs
 /** Dashboard pages that use the full width and height instead of the centered column. */
 const FULL_BLEED = ["/admin/ai"];
 
-export function AdminShell({ user, updateAvailable, children }: { user: SessionUser; updateAvailable?: boolean; children: React.ReactNode }) {
+export function AdminShell({ user, children }: { user: SessionUser; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const fullBleed = FULL_BLEED.includes(usePathname());
   return (
     <div className="min-h-screen">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-line bg-page lg:flex">
-        <SidebarContent user={user} updateAvailable={updateAvailable} />
+        <SidebarContent user={user} />
       </aside>
 
       <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-page/90 px-4 backdrop-blur lg:hidden">
@@ -144,7 +143,7 @@ export function AdminShell({ user, updateAvailable, children }: { user: SessionU
             >
               <X className="size-4.5" />
             </button>
-            <SidebarContent user={user} updateAvailable={updateAvailable} onNavigate={() => setOpen(false)} />
+            <SidebarContent user={user} onNavigate={() => setOpen(false)} />
           </aside>
         </div>
       )}

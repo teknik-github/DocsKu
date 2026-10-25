@@ -1,6 +1,7 @@
 import "server-only";
 import type { AiActionId } from "@/lib/ai/presets";
 import type { ChatMessage } from "@/lib/ai/client";
+import { pageWritingGuide } from "@/lib/ai/writing-guide";
 
 const SYSTEM = `Anda adalah asisten penulis dokumentasi teknis untuk sebuah situs dokumentasi.
 Aturan:
@@ -10,6 +11,9 @@ Aturan:
 - Gunakan Markdown standar bila perlu: judul (## atau ###), daftar, tabel, **tebal**, \`kode\`, dan blok kode berpagar dengan nama bahasa. Jangan pakai HTML.
 - Jangan membungkus seluruh jawaban dalam satu blok kode.
 - Jangan mengarang fakta, angka, URL, atau nama API yang tidak ada di konteks; gunakan placeholder yang jelas bila perlu.`;
+
+/** "Tulis dengan AI" may be asked for a whole page or section: same guide as AI Chat, in plain Markdown. */
+const WRITING_GUIDE = pageWritingGuide(false);
 
 const ACTIONS: Record<Exclude<AiActionId, "write" | "custom" | "description">, string> = {
   improve: "Perbaiki tulisan berikut agar lebih jelas, lancar, dan enak dibaca. Pertahankan makna, istilah teknis, dan format Markdown-nya.",
@@ -52,7 +56,7 @@ export function buildMessages(req: AiRequest): ChatMessage[] {
 
   let task: string;
   if (req.action === "write") {
-    task = `Tulis konten untuk disisipkan ke halaman ini sesuai instruksi berikut:\n${req.instruction}`;
+    task = `${WRITING_GUIDE}\n\nTulis konten untuk disisipkan ke halaman ini sesuai instruksi berikut:\n${req.instruction}`;
   } else if (req.action === "description") {
     task =
       "Tulis satu kalimat deskripsi halaman (maksimal 160 karakter) yang merangkum isi halaman ini, untuk ditampilkan di bawah judul. Balas dengan kalimat itu saja, tanpa tanda kutip dan tanpa Markdown.";

@@ -45,7 +45,8 @@ export async function POST(request: Request) {
   if (!config.apiKey && AI_PRESETS[config.provider].needsKey) return json("API key AI belum diisi di Pengaturan.", 400);
 
   const messages = buildMessages(req);
-  const maxTokens = req.action === "description" ? 200 : undefined;
+  // A whole page or section from "Tulis dengan AI" needs more room than the default limit.
+  const maxTokens = req.action === "description" ? 200 : req.action === "write" ? Math.max(config.maxTokens, 8000) : undefined;
   const key = cacheKey(config, messages, maxTokens);
   const cached = req.fresh ? null : getCached(key);
   const encoder = new TextEncoder();

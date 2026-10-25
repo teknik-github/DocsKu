@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import type { JSONContent } from "@tiptap/core";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -86,12 +87,39 @@ export async function addToNavigation(pageId: string, sectionId: string | null):
       ),
     })),
   };
+  await writeNavigation(next);
+  return target.label;
+}
+
+async function writeNavigation(next: NavigationData) {
   await db
     .insert(schema.settings)
     .values({ key: "navigation", value: next })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value: next } });
-  return target.label;
 }
+
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Finds or creates the section `title` in the tab `tabTitle` (the tab is
+ * created too when missing). Returns its id. Empty sections stay off the site
+ * until a published page is added to them.
+ */
+export async function ensureSection(tabTitle: string, title: string): Promise<string> {
+  const navigation = await readNavigation();
+  const tab = navigation.tabs.find((t) => same(t.title, tabTitle));
+  const existing = tab?.sections.find((section) => same(section.title, title));
+  if (existing) return existing.id;
+  const section = { id: randomUUID(), title: title.trim(), items: [] };
+  const tabs = tab
+    ? navigation.tabs.map((t) => (t === tab ? { ...t, sections: [...t.sections, section] } : t))
+    : [...navigation.tabs, { id: randomUUID(), title: tabTitle.trim(), sections: [section] }];
+  await writeNavigation({ tabs });
+  return section.id;
+}
+
+/** Used when the navigation has no section at all and AI didn't name one. */
+const FALLBACK_SECTION = { tab: "Dokumentasi", title: "Umum" };
 
 // ---- Filling in metadata before publishing ----
 
@@ -105,12 +133,16 @@ const metaReply = z.object({
   seo_title: z.string().trim().max(120).optional(),
   seo_description: z.string().trim().max(320).optional(),
   section: z.string().trim().max(100).optional(),
+  new_section: z
+    .object({ tab: z.string().trim().min(1).max(60), title: z.string().trim().min(1).max(60) })
+    .optional()
+    .catch(undefined),
 });
 
 /** One short AI request for everything missing. Returns {} if AI is off or the reply is unusable. */
 async function suggestMeta(
   draft: PublishDraft,
-  need: { description: boolean; seo: boolean; sections: NavSectionOption[] },
+  need: { description: boolean; seo: boolean; section: boolean; sections: NavSectionOption[]; tabs: string[] },
 ): Promise<z.infer<typeof metaReply>> {
   const config = await getAiConfig();
   if (!configReady(config)) return {};
@@ -118,8 +150,12 @@ async function suggestMeta(
     need.description && `"description": satu kalimat ringkasan isi (maks. 160 karakter) yang tampil di bawah judul`,
     need.seo && `"seo_title": meta title 30–60 karakter yang memuat kata kunci utama`,
     need.seo && `"seo_description": meta description 120–160 karakter yang menarik untuk diklik`,
-    need.sections.length > 0 &&
-      `"section": id bagian navigasi yang paling cocok untuk halaman ini, dipilih dari daftar:\n${need.sections.map((s) => `  - ${s.id}: ${s.label}`).join("\n")}`,
+    need.section &&
+      (need.sections.length
+        ? `"section": id bagian navigasi yang paling cocok untuk halaman ini, dipilih dari daftar:\n${need.sections.map((s) => `  - ${s.id}: ${s.label}`).join("\n")}\n  Kalau tidak ada yang cocok, kosongkan "section" dan isi "new_section"`
+        : `"new_section": navigasi masih kosong, jadi buat bagian pertama untuk halaman ini`),
+    need.section &&
+      `"new_section" (hanya bila perlu): {"tab": nama tab${need.tabs.length ? ` (pakai yang ada bila cocok: ${need.tabs.join(", ")})` : ""}, "title": judul bagian baru, 1–3 kata, umum agar halaman lain sejenis bisa masuk}`,
   ].filter(Boolean);
   const markdown = toMarkdown(draft.content).slice(0, 8_000);
   try {
@@ -176,24 +212,40 @@ export async function prepareForPublish({
 
   const needDescription = settings.description && !draft.description;
   const needSeo = settings.seo && (!draft.seo.title || !draft.seo.description);
+  // First publish without a chosen section: AI picks one, or names a new one when none fits.
   let sections: NavSectionOption[] = [];
+  let tabs: string[] = [];
+  let needSection = false;
   if (settings.navigation && firstPublish && navSection === null) {
     const navigation = await readNavigation();
-    if (!placementOf(navigation, pageId)) sections = sectionOptions(navigation);
+    if (!placementOf(navigation, pageId)) {
+      needSection = true;
+      sections = sectionOptions(navigation);
+      tabs = navigation.tabs.map((tab) => tab.title);
+    }
   }
 
-  if (needDescription || needSeo || sections.length > 1) {
-    const meta = await suggestMeta(next, { description: needDescription, seo: needSeo, sections: sections.length > 1 ? sections : [] });
+  let newSection: { tab: string; title: string } | undefined;
+  if (needDescription || needSeo || needSection) {
+    const meta = await suggestMeta(next, { description: needDescription, seo: needSeo, section: needSection, sections, tabs });
     if (needDescription && meta.description) next.description = filled.description = meta.description;
     if (needSeo && !next.seo.title && meta.seo_title) next.seo.title = meta.seo_title;
     if (needSeo && !next.seo.description && meta.seo_description) next.seo.description = meta.seo_description;
     if (next.seo.title !== draft.seo.title || next.seo.description !== draft.seo.description) filled.seo = next.seo;
     const picked = sections.find((s) => s.id === meta.section);
     if (picked) navSection = picked.id;
+    else if (needSection) newSection = meta.new_section;
   }
-  // Without an AI choice the page goes to the first section; remember it so the editor shows where.
-  if (sections.length && navSection === null) navSection = sections[0].id;
-  const label = sections.find((s) => s.id === navSection)?.label;
+  if (needSection && navSection === null) {
+    // Without an AI choice the page goes to the first section (or a fallback one when there is none).
+    if (newSection || !sections.length) {
+      const wanted = newSection ?? FALLBACK_SECTION;
+      navSection = await ensureSection(wanted.tab, wanted.title);
+      sections = sectionOptions(await readNavigation());
+    } else navSection = sections[0].id;
+  }
+  // Remember it so the editor shows where.
+  const label = needSection ? sections.find((s) => s.id === navSection)?.label : undefined;
   if (label) filled.section = label;
 
   return { draft: next, slug, navSection, filled };

@@ -1,0 +1,68 @@
+# Builds the production image (Dockerfile target "runner") and pushes it to GitHub
+# Container Registry as ghcr.io/<owner>/docsku. No database is needed: the app
+# migrates PostgreSQL and renders its pages when it starts.
+# A release tag vX.Y.Z (made by `pnpm release X.Y.Z`) publishes X.Y.Z and latest;
+# "Run workflow" on a branch publishes the branch name (e.g. main). Every build is
+# also tagged sha-<commit>. Servers pull it with deploy/deploy.sh.
+name: Docker image
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image names and tags
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+            [ "$version" = "$(node -p "require('./package.json').version")" ] || { echo "::error::Tag $GITHUB_REF_NAME does not match package.json"; exit 1; }
+            tags="$version latest"
+          else
+            tags="$(echo "$GITHUB_REF_NAME" | tr -c 'a-zA-Z0-9_.\n-' '-')"
+          fi
+          {
+            echo "app=ghcr.io/$owner/docsku"
+            echo "tags=sha-${GITHUB_SHA::7} $tags"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the app image
+        # The deployment id makes browsers still on the previous version reload instead of erroring.
+        run: |
+          docker build --target runner \
+            --build-arg NEXT_DEPLOYMENT_ID="${GITHUB_SHA::12}" \
+            --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            -t app:build .
+
+      - name: Push
+        env:
+          APP: ${{ steps.meta.outputs.app }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          for tag in $TAGS; do
+            docker tag app:build "$APP:$tag" && docker push "$APP:$tag"
+          done
+          echo "Pushed $APP: $TAGS" >> "$GITHUB_STEP_SUMMARY"

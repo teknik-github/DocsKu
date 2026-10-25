@@ -2,6 +2,7 @@ import type { JSONContent } from "@tiptap/core";
 import { sql } from "drizzle-orm";
 import type { PageSeo } from "@/lib/site-types";
 import {
+  type AnyPgColumn,
   boolean,
   date,
   index,
@@ -18,6 +19,7 @@ import {
 
 export const roleEnum = pgEnum("role", ["admin", "editor"]);
 export const pageStatusEnum = pgEnum("page_status", ["draft", "scheduled", "published"]);
+export const commentStatusEnum = pgEnum("comment_status", ["pending", "approved", "spam"]);
 /** "home" is the single page shown at "/"; everything else lives under /docs. */
 export const pageKindEnum = pgEnum("page_kind", ["doc", "home"]);
 
@@ -261,3 +263,34 @@ export const searchQueries = pgTable(
   },
   (t) => [primaryKey({ columns: [t.query, t.day] }), index("search_queries_day_idx").on(t.day)],
 );
+
+/**
+ * Public comments under published doc pages. Visitors' comments wait for
+ * approval only when manual moderation is on; replies are one level deep. The email is
+ * only ever shown in the dashboard.
+ */
+export const pageComments = pgTable(
+  "page_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    parentId: uuid("parent_id").references((): AnyPgColumn => pageComments.id, { onDelete: "cascade" }),
+    authorName: text("author_name").notNull(),
+    authorEmail: text("author_email"),
+    body: text("body").notNull(),
+    status: commentStatusEnum("status").notNull().default("pending"),
+    /** Written from the dashboard by a signed-in user (shown with a "Tim" badge). */
+    isStaff: boolean("is_staff").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("page_comments_page_idx").on(t.pageId, t.status, t.createdAt),
+    index("page_comments_status_idx").on(t.status, t.createdAt),
+    index("page_comments_parent_idx").on(t.parentId),
+  ],
+);
+
+export type PageComment = typeof pageComments.$inferSelect;

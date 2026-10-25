@@ -1,13 +1,14 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import { and, eq } from "drizzle-orm";
-import { db, schema } from "@/db";
+import { buildingWithoutDatabase, db, schema } from "@/db";
 import type { JSONContent } from "@tiptap/core";
 import { textOf, tocHeadings } from "@/lib/content/doc";
 import { allPages, slugToHref, tabPages } from "@/lib/navigation";
 import { DEFAULT_COVER_COLOR } from "@/lib/cover-palette";
 import type {
   AutomationSettings,
+  CommentSettings,
   CoverShape,
   NavItem,
   NavItemData,
@@ -34,6 +35,7 @@ export const DEFAULT_SITE: SiteSettings = {
 };
 
 async function readSetting<T>(key: string): Promise<T | undefined> {
+  if (buildingWithoutDatabase) return undefined;
   const [row] = await db
     .select({ value: schema.settings.value })
     .from(schema.settings)
@@ -65,6 +67,16 @@ export async function getAutomation(): Promise<AutomationSettings> {
   return { ...DEFAULT_AUTOMATION, ...(await readSetting<Partial<AutomationSettings>>("automation")) };
 }
 
+export const DEFAULT_COMMENTS: CommentSettings = { enabled: true, moderation: false };
+
+/** Whether docs pages show comments, and whether new ones wait for approval (settings key "comments"). */
+export async function getCommentSettings(): Promise<CommentSettings> {
+  "use cache";
+  cacheTag("settings");
+  cacheLife("max");
+  return { ...DEFAULT_COMMENTS, ...(await readSetting<Partial<CommentSettings>>("comments")) };
+}
+
 /**
  * Address of the generated cover for a published page, in the shape it is shown
  * at, so object-fit never crops its text: "card" (16:10 cards), "wide"
@@ -77,6 +89,7 @@ export function generatedCover(slug: string, shape: CoverShape, color: string) {
 }
 
 async function getPublishedPageIndex() {
+  if (buildingWithoutDatabase) return [];
   return db
     .select({ id: schema.pages.id, slug: schema.pages.slug, title: schema.pages.title })
     .from(schema.pages)
@@ -122,6 +135,7 @@ export async function getPublishedPage(slug: string) {
   "use cache";
   cacheTag("pages");
   cacheLife("max");
+  if (buildingWithoutDatabase) return null;
   const [page] = await db
     .select({
       slug: schema.pages.slug,
@@ -143,6 +157,7 @@ export async function getHomePage() {
   "use cache";
   cacheTag("pages");
   cacheLife("max");
+  if (buildingWithoutDatabase) return null;
   const [page] = await db
     .select({ title: schema.pages.title, description: schema.pages.description, content: schema.pages.content, seo: schema.pages.seo })
     .from(schema.pages)
@@ -161,6 +176,7 @@ export async function getSearchIndex(): Promise<SearchEntry[]> {
   "use cache";
   cacheTag("navigation", "pages");
   cacheLife("max");
+  if (buildingWithoutDatabase) return [];
   const [tabs, rows] = await Promise.all([
     getNavigation(),
     db
@@ -200,6 +216,7 @@ export async function getPageCards(): Promise<PageCard[]> {
   "use cache";
   cacheTag("pages");
   cacheLife("max");
+  if (buildingWithoutDatabase) return [];
   const { cover: autoCover, coverColor } = await getAutomation();
   const rows = await db
     .select({

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Check, ThumbsDown, ThumbsUp } from "lucide-react";
+import { PageComments } from "@/components/page-comments";
 
 /** Fire-and-forget POST to a public stats endpoint. */
 export function beacon(url: string, body: unknown) {
@@ -24,7 +25,7 @@ const subscribe = (onChange: () => void) => {
 /**
  * End-of-article block for published doc pages: counts one view per tab
  * (no cookies) and asks whether the page helped, with an optional message
- * that only the dashboard shows.
+ * that only the dashboard shows, followed by the public comments.
  */
 export function ReaderFooter({ slug }: { slug: string }) {
   useEffect(() => {
@@ -35,7 +36,12 @@ export function ReaderFooter({ slug }: { slug: string }) {
     beacon("/api/track", { type: "view", slug });
   }, [slug]);
 
-  return <PageFeedback key={slug} slug={slug} />;
+  return (
+    <>
+      <PageFeedback key={slug} slug={slug} />
+      <PageComments key={`comments:${slug}`} slug={slug} />
+    </>
+  );
 }
 
 type Step = { name: "ask" } | { name: "message"; id: string; helpful: boolean } | { name: "done" };

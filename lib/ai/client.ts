@@ -61,6 +61,8 @@ type Delta = {
   content?: string | null;
   reasoning_content?: string | null;
   tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[];
+  /** From the choice, not the delta: "length" means max_tokens cut the answer off. */
+  finish_reason?: string | null;
 };
 
 /** Posts a streaming chat request and yields each SSE delta, plus token usage at the end. */
@@ -97,15 +99,15 @@ async function* streamDeltas(config: AiConfig, body: Record<string, unknown>, si
       if (!data.startsWith("data:")) continue;
       const payload = data.slice(5).trim();
       if (payload === "[DONE]") return;
-      let chunk: { choices?: { delta?: Delta }[]; usage?: RawUsage | null; error?: { message?: string } };
+      let chunk: { choices?: { delta?: Delta; finish_reason?: string | null }[]; usage?: RawUsage | null; error?: { message?: string } };
       try {
         chunk = JSON.parse(payload);
       } catch {
         continue;
       }
       if (chunk.error) throw new AiError(chunk.error.message ?? "Penyedia AI mengirim error.");
-      const delta = chunk.choices?.[0]?.delta;
-      if (delta) yield delta;
+      const choice = chunk.choices?.[0];
+      if (choice?.delta || choice?.finish_reason) yield { ...choice.delta, finish_reason: choice.finish_reason };
       if (chunk.usage) yield { usage: normalizeUsage(chunk.usage) };
     }
   }
@@ -147,7 +149,13 @@ export type AgentMessage =
       reasoning_content?: string;
     }
   | { role: "tool"; tool_call_id: string; content: string };
-export type AgentPart = StreamPart | UsagePart | { type: "end"; text: string; reasoning: string; toolCalls: ToolCall[] };
+export type AgentPart =
+  | StreamPart
+  | UsagePart
+  /** A tool call's arguments so far (accumulated), sent after each piece arrives. */
+  | { type: "tool_progress"; index: number; name: string; arguments: string }
+  /** `truncated`: the model hit max_tokens, so the last tool call's arguments may be cut off. */
+  | { type: "end"; text: string; reasoning: string; toolCalls: ToolCall[]; truncated: boolean };
 
 /** One model turn with tools: streams text, then reports the tool calls it asked for. */
 export async function* streamAgentTurn(
@@ -167,6 +175,7 @@ export async function* streamAgentTurn(
   let text = "";
   let reasoning = "";
   const calls = new Map<number, ToolCall>();
+  let truncated = false;
   for await (const delta of streamDeltas(config, body, signal)) {
     if ("usage" in delta) {
       yield { type: "usage", usage: delta.usage };
@@ -186,10 +195,13 @@ export async function* streamAgentTurn(
       if (part.function?.name) call.name += part.function.name;
       if (part.function?.arguments) call.arguments += part.function.arguments;
       calls.set(part.index, call);
+      // `index` is the call's position in `toolCalls` below.
+      if (part.function?.arguments) yield { type: "tool_progress", index: [...calls.keys()].indexOf(part.index), name: call.name, arguments: call.arguments };
     }
+    if (delta.finish_reason === "length") truncated = true;
   }
   const toolCalls = [...calls.values()].map((call, i) => ({ ...call, id: call.id || `call_${i}` }));
-  yield { type: "end", text, reasoning, toolCalls };
+  yield { type: "end", text, reasoning, toolCalls, truncated };
 }
 
 /** Collects a whole (short) answer, e.g. for the connection test. */

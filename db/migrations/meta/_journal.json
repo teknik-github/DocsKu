@@ -71,6 +71,13 @@
       "when": 1792886111240,
       "tag": "0009_analytics_redirects",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792915133575,
+      "tag": "0010_page_comments",
+      "breakpoints": true
     }
   ]
 }

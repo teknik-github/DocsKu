@@ -23,16 +23,17 @@ export async function readPublicJson<T>(
   request: Request,
   schema: z.ZodType<T>,
   bucket: string,
-  limits: { perIp: number; global: number },
+  limits: { perIp: number; global: number; maxBody?: number },
 ): Promise<{ data: T } | { response: Response }> {
   const fail = (status: number) => ({ response: new Response(null, { status }) });
+  const maxBody = limits.maxBody ?? MAX_BODY;
   if (!isSameOrigin(request)) return fail(403);
-  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY) return fail(413);
+  if (Number(request.headers.get("content-length") ?? 0) > maxBody) return fail(413);
   const ip = clientIp(request.headers);
   if (ip && !allow(`${bucket}:ip:${ip}`, limits.perIp, 60_000)) return fail(429);
   if (!allow(`${bucket}:all`, limits.global, 60_000)) return fail(429);
   const text = await request.text();
-  if (text.length > MAX_BODY) return fail(413);
+  if (text.length > maxBody) return fail(413);
   let json: unknown;
   try {
     json = JSON.parse(text);

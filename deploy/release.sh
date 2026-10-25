@@ -1,6 +1,7 @@
 #!/bin/sh
 # Publishes a Docsku release: bumps package.json, commits, tags vX.Y.Z, pushes,
-# and creates the GitHub release that the dashboard's update check reads.
+# and creates the GitHub release. The tag makes GitHub Actions build and publish the
+# Docker image ghcr.io/<owner>/docsku:X.Y.Z (and :latest), which deploy/deploy.sh pulls.
 # Usage: pnpm release 0.2.0   (needs a clean, pushed main and the GitHub CLI, gh)
 set -eu
 cd "$(dirname "$0")/.."
@@ -33,6 +34,7 @@ newer=$(node -e '
 previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
 notes=$(mktemp)
 trap 'rm -f "$notes"' EXIT
+owner=$(gh repo view --json owner -q .owner.login | tr '[:upper:]' '[:lower:]')
 {
   echo "## Perubahan"
   echo
@@ -40,9 +42,13 @@ trap 'rm -f "$notes"' EXIT
   echo
   echo "## Cara memperbarui"
   echo
+  echo "Image Docker: \`ghcr.io/$owner/docsku:$version\` (juga \`:latest\`), dibangun GitHub Actions dari tag ini. Di server:"
+  echo
   echo '```sh'
-  echo "git fetch --tags origin && git checkout v$version && pnpm prod:deploy"
+  echo "git pull && pnpm prod:deploy"
   echo '```'
+  echo
+  echo "Database dimigrasi otomatis saat aplikasi menyala. Untuk menahan versi ini, isi \`DOCSKU_VERSION=$version\` di \`.env.production\`."
 } >"$notes"
 
 node -e '

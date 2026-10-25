@@ -91,3 +91,11 @@ export type AutomationSettings = {
   /** Generated cover colour: a preset id, "mixed", or "#rrggbb" (lib/cover-palette.ts). */
   coverColor: string;
 };
+
+/** Public comments under docs pages (settings key "comments"). */
+export type CommentSettings = {
+  /** Show the comment section and accept new comments. */
+  enabled: boolean;
+  /** New comments from visitors wait for approval in the dashboard (off: shown at once, except ones with links). */
+  moderation: boolean;
+};
