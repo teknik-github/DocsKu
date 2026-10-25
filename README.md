@@ -180,3 +180,7 @@ Catatan:
 - Halaman terjadwal diterbitkan oleh server setiap menit. Di platform tanpa server yang berjalan terus (serverless), panggil `POST /api/internal/publish-scheduled` dengan header `Authorization: Bearer $CRON_SECRET` dari cron eksternal, lalu set `DISABLE_SCHEDULER=1`.
 - Keamanan: jalankan produksi (`pnpm build && pnpm start`) di belakang reverse proxy berHTTPS (Caddy/Nginx), lalu set `TRUST_PROXY=1` agar batas percobaan login juga dihitung per IP. Tanpa proxy, header `X-Forwarded-*` diabaikan karena bisa dipalsukan klien.
 - Jika situs diakses lewat domain atau tunnel saat mode dev, tambahkan `DEV_ORIGINS=nama.domain` agar halaman bisa ter-hydrate.
+
+## Lisensi
+
+[MIT](LICENSE) © 2026 Moch Raffi
