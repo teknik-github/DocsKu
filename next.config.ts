@@ -35,6 +35,10 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   allowedDevOrigins: [...localIps, ...extraOrigins],
   poweredByHeader: false,
+  experimental: {
+    // When an AI agent runs next dev/build, stop once if this Next.js has a known security advisory.
+    agentUpgrade: "security",
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
