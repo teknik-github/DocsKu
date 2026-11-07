@@ -140,6 +140,7 @@ export async function POST(request: Request) {
           emit({ t: "error", v: error instanceof AiError ? error.message : "Terjadi kesalahan saat menghubungi AI." });
         }
       } finally {
+        if (request.signal.aborted) reply.stopped = true;
         await save(current.id, { messages: [...messages, reply] }).catch(() => {});
         try {
           controller.close();

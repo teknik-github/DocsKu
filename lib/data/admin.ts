@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, count, desc, eq, ilike, or, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import type { PageStatus } from "@/db/schema";
@@ -32,6 +32,7 @@ const pageListColumns = {
   title: schema.pages.draftTitle,
   status: schema.pages.status,
   hasChanges: schema.pages.hasChanges,
+  navSection: schema.pages.navSection,
   publishedAt: schema.pages.publishedAt,
   updatedAt: schema.pages.updatedAt,
   updatedBy: schema.users.name,
@@ -113,21 +114,39 @@ export async function listMedia() {
     .orderBy(desc(schema.media.createdAt));
 }
 
+/** Users for /admin/users: pages written, last sign-in, and whether a session is still valid. */
 export async function listUsers() {
-  return db
-    .select({
-      id: schema.users.id,
-      name: schema.users.name,
-      email: schema.users.email,
-      role: schema.users.role,
-      createdAt: schema.users.createdAt,
-    })
-    .from(schema.users)
-    .orderBy(asc(schema.users.createdAt));
+  const rows = await db.execute<{
+    id: string;
+    name: string;
+    email: string;
+    role: "admin" | "editor";
+    created_at: Date | string;
+    pages: number;
+    last_login: Date | string | null;
+    active: boolean;
+  }>(sql`
+    select u.id, u.name, u.email, u.role, u.created_at,
+      (select count(*) from pages p where p.author_id = u.id and p.kind = 'doc')::int as pages,
+      (select max(s.created_at) from sessions s where s.user_id = u.id) as last_login,
+      exists (select 1 from sessions s where s.user_id = u.id and s.expires_at > now()) as active
+    from users u
+    order by u.created_at`);
+  const iso = (value: Date | string) => new Date(value).toISOString();
+  return [...rows].map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    createdAt: iso(row.created_at),
+    pages: row.pages,
+    lastLogin: row.last_login ? iso(row.last_login) : null,
+    active: row.active,
+  }));
 }
 
 /** Raw stored settings (uncached), for the settings and navigation editors. */
-export async function readSettingForAdmin<T>(key: "site" | "navigation"): Promise<T | undefined> {
+export async function readSettingForAdmin<T>(key: "site" | "navigation" | "home" | "home_draft"): Promise<T | undefined> {
   const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, key));
   return row?.value as T | undefined;
 }
@@ -155,4 +174,14 @@ export async function ensureHomePage(userId: string, siteName: string) {
     .onConflictDoNothing();
   const [home] = await db.select({ id: schema.pages.id }).from(schema.pages).where(eq(schema.pages.kind, "home"));
   return home.id;
+}
+
+/** Badges in the dashboard sidebar: things waiting for someone. One small query per page load. */
+export async function getNavCounts() {
+  const [row] = await db.execute<{ comments: number; feedback: number; drafts: number }>(sql`
+    select
+      (select count(*) from page_comments where status = 'pending')::int as comments,
+      (select count(*) from page_feedback where not resolved and comment is not null)::int as feedback,
+      (select count(*) from pages where kind = 'doc' and (status = 'draft' or has_changes))::int as drafts`);
+  return row ?? { comments: 0, feedback: 0, drafts: 0 };
 }

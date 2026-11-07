@@ -1,12 +1,16 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { buildingWithoutDatabase, db, schema } from "@/db";
 import type { JSONContent } from "@tiptap/core";
 import { textOf, tocHeadings } from "@/lib/content/doc";
 import { allPages, slugToHref, tabPages } from "@/lib/navigation";
 import { DEFAULT_COVER_COLOR } from "@/lib/cover-palette";
+import { isAiReady } from "@/lib/ai/config";
+import { parseHomeSections } from "@/lib/home-schema";
 import type {
+  HomeSection,
+  AskAiSettings,
   AutomationSettings,
   CommentSettings,
   CoverShape,
@@ -77,6 +81,34 @@ export async function getCommentSettings(): Promise<CommentSettings> {
   return { ...DEFAULT_COMMENTS, ...(await readSetting<Partial<CommentSettings>>("comments")) };
 }
 
+/** The published home sections (settings key "home"), or null when the builder was never used. */
+export async function getHomeSections(): Promise<HomeSection[] | null> {
+  "use cache";
+  cacheTag("settings");
+  cacheLife("max");
+  return parseHomeSections(await readSetting<unknown>("home"));
+}
+
+export const DEFAULT_ASK_AI: AskAiSettings = { enabled: true, perMinute: 5, dailyLimit: 500 };
+
+/** "Tanya AI" in the search box (settings key "ask_ai"). */
+export async function getAskAiSettings(): Promise<AskAiSettings> {
+  "use cache";
+  cacheTag("settings");
+  cacheLife("max");
+  return { ...DEFAULT_ASK_AI, ...(await readSetting<Partial<AskAiSettings>>("ask_ai")) };
+}
+
+/** Whether the search box offers "Tanya AI": switched on, and AI is set up (Pengaturan → AI). */
+export async function getAskAiAvailable(): Promise<boolean> {
+  "use cache";
+  cacheTag("settings");
+  cacheLife("max");
+  if (buildingWithoutDatabase) return false;
+  const [settings, ready] = await Promise.all([getAskAiSettings(), isAiReady()]);
+  return settings.enabled && settings.dailyLimit > 0 && ready;
+}
+
 /**
  * Address of the generated cover for a published page, in the shape it is shown
  * at, so object-fit never crops its text: "card" (16:10 cards), "wide"
@@ -123,7 +155,7 @@ export async function getNavigation(): Promise<NavTab[]> {
   const pagesById = new Map(published.map((page) => [page.id, page]));
   return (navigation?.tabs ?? []).flatMap((tab) => {
     const sections = tab.sections
-      .map((section) => ({ title: section.title, items: resolveItems(section.items, pagesById) }))
+      .map((section) => ({ title: section.title, image: section.image, items: resolveItems(section.items, pagesById) }))
       .filter((section) => section.items.length > 0);
     const resolved: NavTab = { title: tab.title, href: "", sections };
     const first = tabPages(resolved)[0];
@@ -239,4 +271,31 @@ export async function getPageCards(): Promise<PageCard[]> {
     publishedAt: row.publishedAt?.toISOString() ?? null,
     featured: row.featured,
   }));
+}
+
+/**
+ * Hrefs of the most read published docs pages over the last 30 days, most read first.
+ * Views are counted without invalidating tags, so this refreshes hourly.
+ */
+export async function getPopularPages(limit = 6): Promise<string[]> {
+  "use cache";
+  cacheTag("pages");
+  cacheLife("hours");
+  if (buildingWithoutDatabase) return [];
+  const views = sql<number>`sum(${schema.pageViews.views})`;
+  const rows = await db
+    .select({ slug: schema.pages.slug })
+    .from(schema.pageViews)
+    .innerJoin(schema.pages, eq(schema.pages.id, schema.pageViews.pageId))
+    .where(
+      and(
+        eq(schema.pages.status, "published"),
+        eq(schema.pages.kind, "doc"),
+        gte(schema.pageViews.day, sql`(now() at time zone 'Asia/Jakarta')::date - 30`),
+      ),
+    )
+    .groupBy(schema.pages.slug)
+    .orderBy(desc(views))
+    .limit(limit);
+  return rows.map((row) => slugToHref(row.slug));
 }

@@ -44,6 +44,14 @@ const nextConfig: NextConfig = {
       { source: "/:path*", headers: securityHeaders },
       // Uploaded files are served as passive images only (the later rule wins for the same key).
       { source: "/media/:file*", headers: [{ key: "Content-Security-Policy", value: "default-src 'none'; frame-ancestors 'none'" }] },
+      // The home builder (/admin/home) shows this preview in a frame on the same site.
+      {
+        source: "/preview/beranda",
+        headers: [
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        ],
+      },
       {
         // HSTS only means something over HTTPS, i.e. behind a TLS-terminating proxy.
         source: "/:path*",

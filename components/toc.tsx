@@ -12,13 +12,17 @@ export function TableOfContents({ headings }: { headings: Heading[] }) {
       .filter((el): el is HTMLElement => el !== null);
     if (elements.length === 0) return;
 
+    // Where a heading lands after its link is clicked (the page's scroll padding plus the
+    // heading's scroll margin), with a little slack, so the clicked heading is the active one.
+    const padding = parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0;
+    const offsets = elements.map((el) => Math.max(120, padding + (parseFloat(getComputedStyle(el).scrollMarginTop) || 0) + 16));
+
     // The active heading is the last one that has scrolled past the top band.
     function update() {
-      const offset = 120;
       let current = elements[0].id;
-      for (const el of elements) {
-        if (el.getBoundingClientRect().top - offset <= 0) current = el.id;
-      }
+      elements.forEach((el, i) => {
+        if (el.getBoundingClientRect().top - offsets[i] <= 0) current = el.id;
+      });
       const atBottom =
         window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
       setActiveId(atBottom ? elements[elements.length - 1].id : current);

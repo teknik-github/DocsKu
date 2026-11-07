@@ -10,6 +10,7 @@ import { CopyPageButton } from "@/components/copy-page-button";
 import { SiteFooter } from "@/components/site-footer";
 import { CoverArt, Meta, PageCardView } from "@/components/publication/cards";
 import { SectionMenu } from "@/components/publication/section-menu";
+import { TableOfContents } from "@/components/toc";
 
 export type ArticleData = {
   href: string;
@@ -25,12 +26,12 @@ export type ArticleData = {
 
 const markdownOf = (a: ArticleData) => `# ${a.title}\n\n${a.description ? `${a.description}\n\n` : ""}${toMarkdown(a.doc)}`;
 
-/** Collapsible table of contents for layouts without a side column. */
-function InlineToc({ doc }: { doc: JSONContent }) {
+/** Collapsible table of contents above the article, for screens too narrow for the side column. */
+function InlineToc({ doc, className = "" }: { doc: JSONContent; className?: string }) {
   const headings = tocHeadings(doc);
   if (headings.length < 3) return null;
   return (
-    <details className="group mb-10 rounded-xl border border-line bg-surface px-4 py-3 text-sm">
+    <details className={`group mb-10 rounded-xl border border-line bg-surface px-4 py-3 text-sm ${className}`}>
       <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-fg [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-4 text-fg-subtle transition-transform group-open:rotate-90" />
         Isi halaman
@@ -46,6 +47,20 @@ function InlineToc({ doc }: { doc: JSONContent }) {
         ))}
       </ul>
     </details>
+  );
+}
+
+/**
+ * "Di halaman ini" in the right margin on wide screens (xl), sticky and following the
+ * scroll. Sits in column 3 of a `[1fr article 1fr]` grid so the article stays centred.
+ */
+function SideToc({ doc }: { doc: JSONContent }) {
+  return (
+    <aside className="hidden xl:col-start-3 xl:row-start-1 xl:block">
+      <div className="sticky top-[calc(var(--header-h)+3rem)] max-h-[calc(100vh-var(--header-h)-4rem)] overflow-y-auto pb-4">
+        <TableOfContents headings={tocHeadings(doc)} />
+      </div>
+    </aside>
   );
 }
 
@@ -97,52 +112,55 @@ export function HybridArticle({
           {place && <SectionMenu section={place.section.title} pages={place.pages} current={article.href} />}
         </div>
 
-        <article className="mx-auto max-w-3xl">
-          {banner}
-          <header className="mb-10">
-            <h1 className="font-serif text-4xl leading-tight font-light tracking-tight text-fg sm:text-5xl">{article.title}</h1>
-            {article.description && <p className="mt-4 text-xl leading-relaxed text-fg-muted">{article.description}</p>}
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-y border-line py-3">
-              <Meta card={article} />
-              <CopyPageButton markdown={markdownOf(article)} />
+        <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,48rem)_minmax(0,1fr)] xl:gap-10">
+          <article className="mx-auto max-w-3xl min-w-0 xl:col-start-2 xl:row-start-1 xl:mx-0 xl:max-w-none">
+            {banner}
+            <header className="mb-10">
+              <h1 className="font-serif text-4xl leading-tight font-light tracking-tight text-fg sm:text-5xl">{article.title}</h1>
+              {article.description && <p className="mt-4 text-xl leading-relaxed text-fg-muted">{article.description}</p>}
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-y border-line py-3">
+                <Meta card={article} />
+                <CopyPageButton markdown={markdownOf(article)} />
+              </div>
+            </header>
+            {article.cover && (
+              <div className="mb-10 aspect-[2/1] overflow-hidden rounded-2xl border border-line">
+                <CoverArt src={article.cover} title={article.title} />
+              </div>
+            )}
+            <InlineToc doc={article.doc} className="xl:hidden" />
+            <div className="prose-docs">
+              <RenderDoc doc={article.doc} />
             </div>
-          </header>
-          {article.cover && (
-            <div className="mb-10 aspect-[2/1] overflow-hidden rounded-2xl border border-line">
-              <CoverArt src={article.cover} title={article.title} />
-            </div>
-          )}
-          <InlineToc doc={article.doc} />
-          <div className="prose-docs">
-            <RenderDoc doc={article.doc} />
-          </div>
-          {footer}
+            {footer}
 
-          {(prev || next) && (
-            <nav aria-label="Navigasi halaman" className="mt-16 grid gap-4 sm:grid-cols-2">
-              {prev ? (
-                <Link href={prev.href} className="group rounded-xl border border-line p-4 transition-colors hover:border-line-strong hover:bg-fill/40">
-                  <span className="flex items-center gap-1 text-xs text-fg-subtle">
-                    <ArrowLeft className="size-3 transition-transform group-hover:-translate-x-0.5" />
-                    Sebelumnya
-                  </span>
-                  <span className="mt-1 block text-sm font-medium text-fg">{prev.title}</span>
-                </Link>
-              ) : (
-                <span />
-              )}
-              {next && (
-                <Link href={next.href} className="group rounded-xl border border-line p-4 text-right transition-colors hover:border-line-strong hover:bg-fill/40">
-                  <span className="flex items-center justify-end gap-1 text-xs text-fg-subtle">
-                    Berikutnya
-                    <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
-                  </span>
-                  <span className="mt-1 block text-sm font-medium text-fg">{next.title}</span>
-                </Link>
-              )}
-            </nav>
-          )}
-        </article>
+            {(prev || next) && (
+              <nav aria-label="Navigasi halaman" className="mt-16 grid gap-4 sm:grid-cols-2">
+                {prev ? (
+                  <Link href={prev.href} className="group rounded-xl border border-line p-4 transition-colors hover:border-line-strong hover:bg-fill/40">
+                    <span className="flex items-center gap-1 text-xs text-fg-subtle">
+                      <ArrowLeft className="size-3 transition-transform group-hover:-translate-x-0.5" />
+                      Sebelumnya
+                    </span>
+                    <span className="mt-1 block text-sm font-medium text-fg">{prev.title}</span>
+                  </Link>
+                ) : (
+                  <span />
+                )}
+                {next && (
+                  <Link href={next.href} className="group rounded-xl border border-line p-4 text-right transition-colors hover:border-line-strong hover:bg-fill/40">
+                    <span className="flex items-center justify-end gap-1 text-xs text-fg-subtle">
+                      Berikutnya
+                      <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
+                    </span>
+                    <span className="mt-1 block text-sm font-medium text-fg">{next.title}</span>
+                  </Link>
+                )}
+              </nav>
+            )}
+          </article>
+          <SideToc doc={article.doc} />
+        </div>
 
         {related.length > 0 && place && (
           <section className="mt-20 border-t border-line pt-12">
@@ -207,10 +225,16 @@ export function GhostArticle({
             <CoverArt src={article.cover ?? article.autoCover ?? null} title={article.title} />
           </div>
         </div>
-        <div className="prose-docs prose-reading mx-auto mt-14 max-w-[44rem] px-5 sm:px-8">
-          <RenderDoc doc={article.doc} />
+        <div className="mx-auto mt-14 max-w-6xl px-5 sm:px-8 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,44rem)_minmax(0,1fr)] xl:gap-10">
+          <div className="mx-auto max-w-[44rem] min-w-0 xl:col-start-2 xl:row-start-1 xl:mx-0 xl:max-w-none">
+            <InlineToc doc={article.doc} className="xl:hidden" />
+            <div className="prose-docs prose-reading">
+              <RenderDoc doc={article.doc} />
+            </div>
+            {footer}
+          </div>
+          <SideToc doc={article.doc} />
         </div>
-        {footer && <div className="mx-auto max-w-[44rem] px-5 sm:px-8">{footer}</div>}
       </article>
 
       {more.length > 0 && (

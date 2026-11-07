@@ -1,5 +1,6 @@
 "use server";
 
+import { updateTag } from "next/cache";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
@@ -7,6 +8,7 @@ import { canEncrypt, decryptSecret, encryptSecret } from "@/lib/crypto";
 import { readStoredAi, toView, type AiConfig, type StoredAiSettings } from "@/lib/ai/config";
 import { AiError, completeChat, listModels } from "@/lib/ai/client";
 import type { AiSettingsView } from "@/lib/ai/presets";
+import type { AskAiSettings } from "@/lib/site-types";
 
 const formSchema = z.object({
   enabled: z.boolean(),
@@ -61,6 +63,8 @@ export async function saveAiSettings(input: AiForm): Promise<Result<{ view: AiSe
     .insert(schema.settings)
     .values({ key: "ai", value: next })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value: next } });
+  // "Tanya AI" in the public search box depends on AI being ready.
+  updateTag("settings");
   return { ok: true, view: toView(next) };
 }
 
@@ -89,4 +93,24 @@ export async function fetchAiModels(input: AiForm): Promise<Result<{ models: str
   } catch (error) {
     return { ok: false, error: error instanceof AiError ? error.message : "Gagal memuat daftar model." };
   }
+}
+
+const askAiSchema = z.object({
+  enabled: z.boolean(),
+  perMinute: z.number().int().min(1).max(60),
+  dailyLimit: z.number().int().min(1).max(100_000),
+});
+
+/** Pengaturan → Tanya AI (public answers in the search box). Admins only. */
+export async function saveAskAiSettings(input: AskAiSettings): Promise<Result> {
+  const user = await authorize("admin");
+  if ("error" in user) return { ok: false, error: user.error };
+  const parsed = askAiSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Batas per menit 1–60 dan batas harian minimal 1." };
+  await db
+    .insert(schema.settings)
+    .values({ key: "ask_ai", value: parsed.data })
+    .onConflictDoUpdate({ target: schema.settings.key, set: { value: parsed.data } });
+  updateTag("settings");
+  return { ok: true };
 }

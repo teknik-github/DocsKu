@@ -1,14 +1,23 @@
-export function AuthCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+/** Heading and body of the login/setup forms (layout in app/admin/(auth)/layout.tsx). */
+export function AuthCard({
+  title,
+  description,
+  footer,
+  children,
+}: {
+  title: string;
+  description: string;
+  footer?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <>
-      <div className="mb-8 text-center">
-        <span className="mx-auto mb-5 flex size-10 items-center justify-center rounded-xl bg-accent font-serif text-lg text-white">
-          D
-        </span>
-        <h1 className="font-serif text-3xl font-light tracking-tight text-fg">{title}</h1>
-        <p className="mt-2 text-sm text-fg-muted">{description}</p>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col items-center gap-2 text-center">
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">{title}</h1>
+        <p className="text-sm text-balance text-fg-muted">{description}</p>
       </div>
-      <div className="rounded-2xl border border-line bg-surface p-6 shadow-sm">{children}</div>
-    </>
+      {children}
+      {footer && <p className="text-center text-sm text-balance text-fg-subtle">{footer}</p>}
+    </div>
   );
 }

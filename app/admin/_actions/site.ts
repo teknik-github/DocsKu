@@ -9,6 +9,8 @@ import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
 import { STORED_NAME, uploadPath } from "@/lib/media";
 import { isCoverColor } from "@/lib/cover-palette";
+import { COLOR_THEME_IDS } from "@/lib/color-themes";
+import { isCategoryImage } from "@/lib/categories";
 import type { AutomationSettings, DocsLayout, NavigationData, SiteSettings } from "@/lib/site-types";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -50,9 +52,9 @@ export async function saveSiteSettings(input: SiteSettings): Promise<Result> {
   if ("error" in user) return { ok: false, error: user.error };
   const parsed = siteSchema.omit({ layout: true }).safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  // The theme is chosen on its own page; keep whatever is active.
+  // The layout and colours are chosen on the Tema page; keep whatever is active.
   const stored = await readSite();
-  await writeSite({ ...parsed.data, layout: stored.layout ?? "docs" });
+  await writeSite({ ...parsed.data, layout: stored.layout ?? "docs", ...(stored.colorTheme ? { colorTheme: stored.colorTheme } : {}) });
   return { ok: true };
 }
 
@@ -62,6 +64,16 @@ export async function saveTheme(layout: DocsLayout): Promise<Result> {
   const parsed = z.enum(["docs", "hybrid", "ghost"]).safeParse(layout);
   if (!parsed.success) return { ok: false, error: "Tema tidak dikenal." };
   await writeSite({ ...(await readSite()), layout: parsed.data });
+  return { ok: true };
+}
+
+/** Colours for the whole site and dashboard (Tema → Warna). */
+export async function saveColorTheme(colorTheme: string): Promise<Result> {
+  const user = await authorize("admin");
+  if ("error" in user) return { ok: false, error: user.error };
+  const parsed = z.enum(COLOR_THEME_IDS).safeParse(colorTheme);
+  if (!parsed.success) return { ok: false, error: "Tema warna tidak dikenal." };
+  await writeSite({ ...(await readSite()), colorTheme: parsed.data });
   return { ok: true };
 }
 
@@ -95,6 +107,8 @@ type NavItemInput =
   | { type: "link"; title: string; href: string }
   | { type: "group"; title: string; items: NavItemInput[] };
 
+const categoryImage = z.string().trim().max(500).refine(isCategoryImage, "Gambar kategori harus dari Media atau URL https.");
+
 const navItem: z.ZodType<NavItemInput> = z.lazy(() =>
   z.discriminatedUnion("type", [
     z.object({ type: z.literal("page"), pageId: z.uuid(), title: z.string().trim().max(120).optional() }),
@@ -110,7 +124,7 @@ const navigationSchema = z.object({
         id: z.string().max(64).optional(),
         title: label,
         sections: z
-          .array(z.object({ id: z.string().max(64).optional(), title: label, items: z.array(navItem).max(200) }))
+          .array(z.object({ id: z.string().max(64).optional(), title: label, image: categoryImage.optional(), items: z.array(navItem).max(200) }))
           .max(50),
       }),
     )
@@ -126,7 +140,13 @@ export async function saveNavigation(input: NavigationData): Promise<Result> {
     tabs: parsed.data.tabs.map((tab) => ({
       id: tab.id || randomUUID(),
       title: tab.title,
-      sections: tab.sections.map((section) => ({ id: section.id || randomUUID(), title: section.title, items: section.items })),
+      sections: tab.sections.map((section) => ({
+        id: section.id || randomUUID(),
+        title: section.title,
+        // The category image is set in Halaman; keep it through navigation edits.
+        ...(section.image ? { image: section.image } : {}),
+        items: section.items,
+      })),
     })),
   };
   await db

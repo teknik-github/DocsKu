@@ -50,6 +50,8 @@ export type ChatMessage =
       tools: string[];
       proposals: ProposalState[];
       error?: string;
+      /** The user stopped the reply; what was written so far is kept. */
+      stopped?: boolean;
       model?: string;
       /** Tokens used for this reply; `cached` came from the provider's prompt cache. */
       usage?: { input: number; cached: number; output: number };

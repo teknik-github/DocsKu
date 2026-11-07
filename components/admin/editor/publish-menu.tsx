@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { formatDateTime } from "@/components/admin/format";
 import { Button, buttonClass, inputClass } from "@/components/admin/ui";
+import { confirmDialog } from "@/components/admin/dialog";
 
 type Status = "draft" | "scheduled" | "published";
 
@@ -99,7 +100,15 @@ export function PublishMenu({
                 variant="danger"
                 className="w-full"
                 disabled={busy}
-                onClick={() => confirm("Tarik halaman ini dari situs? Isinya tetap tersimpan sebagai draf.") && run(onUnpublish)}
+                onClick={async () => {
+                  const ok = await confirmDialog({
+                    title: "Tarik halaman ini dari situs?",
+                    message: "Pengunjung tidak bisa membukanya lagi. Isinya tetap tersimpan sebagai draf.",
+                    confirmLabel: "Tarik dari situs",
+                    tone: "danger",
+                  });
+                  if (ok) run(onUnpublish);
+                }}
               >
                 Batalkan terbit
               </Button>

@@ -28,7 +28,8 @@ export const NO_NAV = "none";
 
 export type NavSectionOption = { id: string; label: string };
 
-async function readNavigation(): Promise<NavigationData> {
+/** Uncached navigation as stored (tabs → sections → items). */
+export async function readNavigation(): Promise<NavigationData> {
   const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, "navigation"));
   return (row?.value as NavigationData | undefined) ?? { tabs: [] };
 }
@@ -91,7 +92,7 @@ export async function addToNavigation(pageId: string, sectionId: string | null):
   return target.label;
 }
 
-async function writeNavigation(next: NavigationData) {
+export async function writeNavigation(next: NavigationData) {
   await db
     .insert(schema.settings)
     .values({ key: "navigation", value: next })

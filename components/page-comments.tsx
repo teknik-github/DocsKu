@@ -77,7 +77,7 @@ export function PageComments({ slug }: { slug: string }) {
   const replies = (id: string) => data.comments.filter((c) => c.parentId === id);
 
   return (
-    <section aria-labelledby="comments-title" data-testid="page-comments" className="not-prose mt-10">
+    <section id="komentar" aria-labelledby="comments-title" data-testid="page-comments" className="not-prose mt-10 scroll-mt-24">
       <h2 id="comments-title" className="flex items-center gap-2 text-base font-semibold text-fg">
         <MessageSquare className="size-4 text-fg-subtle" />
         Komentar{data.comments.length > 0 && <span className="text-sm font-normal text-fg-subtle tabular-nums">({data.comments.length})</span>}

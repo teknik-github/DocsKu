@@ -94,3 +94,25 @@ export async function getSearchStats(days: Range, limit = 12) {
   ]);
   return { top: [...top], misses: [...misses], ...totals };
 }
+
+/** "Tanya AI" questions, shaped like search stats (`searches` = times asked, `misses` = docs had no answer). */
+export async function getAskStats(days: Range, limit = 12) {
+  const grouped = sql`select query, sum(asks)::int as searches, sum(misses)::int as misses from ask_ai_queries where day >= ${since(days)} group by query`;
+  const [top, misses, [totals]] = await Promise.all([
+    db.execute<SearchStat>(sql`${grouped} order by searches desc, query limit ${limit}`),
+    db.execute<SearchStat>(sql`${grouped} having sum(misses) > 0 order by misses desc, query limit ${limit}`),
+    db.execute<{ asks: number; missed: number }>(sql`
+      select coalesce(sum(asks), 0)::int as asks, coalesce(sum(misses), 0)::int as missed from ask_ai_queries where day >= ${since(days)}`),
+  ]);
+  return { top: [...top], misses: [...misses], ...totals };
+}
+
+/** How many items each feedback filter shows (for the filter labels). */
+export async function getFeedbackCounts(): Promise<Record<FeedbackFilter, number>> {
+  const [row] = await db.execute<Record<FeedbackFilter, number>>(sql`
+    select count(*)::int as all,
+      count(*) filter (where not resolved and comment is not null)::int as open,
+      count(*) filter (where comment is not null)::int as messages
+    from page_feedback`);
+  return row ?? { all: 0, open: 0, messages: 0 };
+}

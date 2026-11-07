@@ -32,7 +32,7 @@ export function CommentSettingsForm({ initial }: { initial: CommentSettings }) {
 
   return (
     <Panel className="max-w-3xl space-y-5 p-5">
-      <div id="komentar" className="scroll-mt-20">
+      <div>
         <h2 className="flex items-center gap-2 text-sm font-medium">
           <MessageSquare className="size-4 text-accent" />
           Komentar

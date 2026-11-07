@@ -3,16 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  ArrowDown,
   ArrowUp,
   Check,
   ChevronDown,
+  Copy,
   Cpu,
   FilePlus2,
   History,
   ListChecks,
   Loader2,
   PencilLine,
+  Pencil,
   Plus,
+  RotateCcw,
   Search,
   Shrink,
   Sparkles,
@@ -29,11 +33,14 @@ import {
   listConversations,
   renameConversation,
   setConversationModel,
+  truncateConversation,
   updateProposal,
 } from "@/app/admin/_actions/chat";
+import { copyText } from "@/lib/copy-text";
 import { describeUsage, readNdjson, renderChatMarkdown } from "@/components/admin/editor/ai-client";
 import { formatDateTime } from "@/components/admin/format";
 import type { AgentEvent, ChatMessage, ConversationListItem, CurrentPage, Proposal, ProposalState } from "@/lib/ai/chat-types";
+import { confirmDialog } from "@/components/admin/dialog";
 
 type Assistant = Extract<ChatMessage, { role: "assistant" }>;
 type ApplyMode = "draft" | "publish" | "schedule";
@@ -52,6 +59,8 @@ const STARTERS = {
     "Buat kerangka halaman panduan instalasi",
     "Tulis halaman baru: panduan memulai untuk pemula",
     "Halaman mana yang perlu ditambah agar dokumentasi lengkap?",
+    "Bagaimana cara instalasi menurut dokumentasi ini?",
+    "Cari halaman yang isinya sudah usang atau tumpang tindih",
   ],
 };
 
@@ -62,8 +71,11 @@ export function AiChat({
   getPage,
   onApplyEdit,
   onClose,
+  initialInput,
 }: {
   enabled: boolean;
+  /** Text to start the message box with (e.g. "Tulis" from Statistik); never sent on its own. */
+  initialInput?: string;
   /** "panel" sits beside the editor; "page" is the full AI Chat screen with a history column. */
   layout?: "panel" | "page";
   /** Limits the history to chats about this page (editor panel). */
@@ -84,13 +96,18 @@ export function AiChat({
   const [defaultModel, setDefaultModel] = useState("");
   const [model, setModel] = useState("");
   const [showHistory, setShowHistory] = useState(false);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialInput ?? "");
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [notice, setNotice] = useState("");
   const abort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  /** Follow new text only while the reader is at the bottom; scrolling up stops it. */
+  const stick = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
 
   async function refreshList() {
     setConversations(await listConversations(pageId ?? null));
@@ -123,24 +140,45 @@ export function AiChat({
   // Load the model list and history once; in the editor, reopen this page's latest chat.
   useEffect(() => {
     if (!enabled) return;
-    (async () => {
-      const [{ models: found, defaultModel: fallback }, list] = await Promise.all([
-        listChatModels(),
-        listConversations(pageId ?? null),
-      ]);
+    // Separately: the model list asks the AI provider and can be slow; history must not wait for it.
+    void listChatModels().then(({ models: found, defaultModel: fallback }) => {
       setModels(found);
       setDefaultModel(fallback);
+    });
+    void listConversations(pageId ?? null).then(async (list) => {
       setConversations(list);
       if (pageId && list[0]) await open(list[0].id);
-    })();
+    });
     return () => abort.current?.abort();
     // Runs once per mounted chat.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" });
+    if (stick.current) bottom.current?.scrollIntoView({ block: "end" });
   }, [messages, drafts]);
+
+  function onScroll() {
+    const el = scroller.current;
+    if (!el) return;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    stick.current = near;
+    setAtBottom(near);
+  }
+
+  function toBottom() {
+    stick.current = true;
+    setAtBottom(true);
+    bottom.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }
+
+  // The message box grows with its text, up to a limit.
+  useEffect(() => {
+    const el = textarea.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [input]);
 
   const updateReply = (fn: (m: Assistant) => Assistant) =>
     setMessages((list) => {
@@ -160,6 +198,8 @@ export function AiChat({
     setInput("");
     setBusy(true);
     setNotice("");
+    stick.current = true;
+    setAtBottom(true);
     const controller = new AbortController();
     abort.current = controller;
     try {
@@ -230,7 +270,8 @@ export function AiChat({
         }
       });
     } catch (e) {
-      if (!controller.signal.aborted) updateReply((m) => ({ ...m, error: (e as Error).message }));
+      if (controller.signal.aborted) updateReply((m) => ({ ...m, stopped: true }));
+      else updateReply((m) => ({ ...m, error: (e as Error).message }));
     } finally {
       // A draft whose tool call never finished (stream cut, stopped) must not linger.
       setDrafts([]);
@@ -283,6 +324,26 @@ export function AiChat({
     }
   }
 
+  /**
+   * "Coba lagi" (send the same message again) and "Edit" (put it back in the box):
+   * both drop that message and everything after it, here and in the stored chat.
+   */
+  async function rewind(message: ChatMessage, then: "retry" | "edit") {
+    if (busy || message.role !== "user") return;
+    const index = messages.findIndex((m) => m.id === message.id);
+    if (index < 0) return;
+    if (activeId) {
+      const result = await truncateConversation(activeId, message.id);
+      if (!result.ok) return setNotice(result.error);
+    }
+    setMessages((list) => list.slice(0, index));
+    if (then === "retry") void send(message.content);
+    else {
+      setInput(message.content);
+      requestAnimationFrame(() => textarea.current?.focus());
+    }
+  }
+
   async function compactNow() {
     if (!activeId) return;
     setNotice("Meringkas percakapan…");
@@ -294,7 +355,8 @@ export function AiChat({
   }
 
   async function remove(id: string) {
-    if (!confirm("Hapus percakapan ini?")) return;
+    const ok = await confirmDialog({ title: "Hapus percakapan ini?", message: "Seluruh pesan dalam percakapan ini dihapus permanen.", confirmLabel: "Hapus", tone: "danger" });
+    if (!ok) return;
     await deleteConversation(id);
     if (id === activeId) startNew();
     await refreshList();
@@ -372,21 +434,30 @@ export function AiChat({
         </div>
       )}
 
-      <div className={`min-h-0 flex-1 space-y-4 overflow-y-auto ${layout === "page" ? "px-6 py-6 lg:px-10" : "p-4"}`}>
+      <div ref={scroller} onScroll={onScroll} className={`min-h-0 flex-1 overflow-y-auto ${layout === "page" ? "px-6 py-6 lg:px-10" : "p-4"}`}>
+        <div className={`space-y-4 ${layout === "page" ? "mx-auto max-w-3xl" : ""}`}>
         {messages.length === 0 && (
-          <div className="space-y-3 pt-4">
-            <p className="text-sm text-fg-muted">
+          <div className={layout === "page" ? "flex flex-col items-center pt-[8vh] text-center" : "space-y-3 pt-4"}>
+            {layout === "page" && (
+              <>
+                <span className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-accent-soft text-accent">
+                  <Sparkles className="size-6" />
+                </span>
+                <h2 className="font-serif text-2xl font-light tracking-tight text-fg">Apa yang ingin Anda tulis hari ini?</h2>
+              </>
+            )}
+            <p className={`text-sm text-fg-muted ${layout === "page" ? "mt-2 max-w-md" : ""}`}>
               {mode === "page"
                 ? "Tanya atau minta bantuan untuk halaman ini: judul, isi, struktur, atau SEO. Setiap perubahan muncul sebagai usulan yang bisa Anda terapkan."
-                : "Rencanakan dan tulis dokumentasi: ide topik, kerangka, sampai draf halaman baru siap disunting."}
+                : "Rencanakan dan tulis dokumentasi: ide topik, kerangka, sampai draf halaman baru. AI membaca isi situs Anda dan tidak pernah menerbitkan sendiri."}
             </p>
-            <div className="flex flex-col gap-1.5">
+            <div className={layout === "page" ? "mt-6 grid w-full gap-2 sm:grid-cols-2" : "flex flex-col gap-1.5"}>
               {STARTERS[mode].map((starter) => (
                 <button
                   key={starter}
                   type="button"
                   onClick={() => send(starter)}
-                  className="rounded-lg border border-line bg-surface px-3 py-2 text-left text-xs text-fg-muted hover:border-accent hover:text-fg"
+                  className="rounded-xl border border-line bg-surface px-3.5 py-2.5 text-left text-xs text-fg-muted transition-colors hover:border-accent hover:text-fg"
                 >
                   {starter}
                 </button>
@@ -399,17 +470,19 @@ export function AiChat({
           <div key={message.id} className="space-y-4">
             {i === compactedCount && compactedCount > 0 && summary && <CompactedDivider count={compactedCount} summary={summary} />}
             {message.role === "user" ? (
-              <div className="flex justify-end">
+              <div className="group/user flex flex-col items-end gap-1">
                 <div className="max-w-[85%] rounded-2xl rounded-br-md bg-fill px-3.5 py-2 text-sm whitespace-pre-wrap text-fg">{message.content}</div>
+                {!busy && i >= compactedCount && i === messages.findLastIndex((m) => m.role === "user") && (
+                  <div className="flex gap-0.5 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
+                    <MessageAction label="Edit pesan" onClick={() => rewind(message, "edit")}>
+                      <Pencil className="size-3" />
+                    </MessageAction>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-2">
-                {message.tools.map((tool, j) => (
-                  <p key={j} className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
-                    <Search className="size-3" />
-                    {tool}
-                  </p>
-                ))}
+                {message.tools.length > 0 && <ToolSteps tools={message.tools} live={busy && i === messages.length - 1} />}
                 {message.content && (
                   <div className="chat-prose text-sm leading-relaxed text-fg" dangerouslySetInnerHTML={{ __html: renderChatMarkdown(message.content) }} />
                 )}
@@ -424,12 +497,24 @@ export function AiChat({
                 ))}
                 {busy && i === messages.length - 1 && drafts.map((draft) => <DraftCard key={draft.key} draft={draft} />)}
                 {!(busy && i === messages.length - 1) && <ApplyAll message={message} onApplyAll={() => applyAll(message)} />}
-                {message.error && <p className="text-sm text-red-600 dark:text-red-400">{message.error}</p>}
-                {message.usage && (
-                  <p className="text-[10px] text-fg-subtle" title="Token yang dipakai untuk jawaban ini">
-                    {message.model && `${message.model} · `}
-                    {describeUsage(message.usage)}
-                  </p>
+                {message.error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{message.error}</p>}
+                {message.stopped && <p className="text-xs text-fg-subtle italic">Dihentikan.</p>}
+                {!(busy && i === messages.length - 1) && (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {message.content && <CopyAction text={message.content} />}
+                    {i === messages.length - 1 && messages[i - 1]?.role === "user" && i - 1 >= compactedCount && (
+                      <MessageAction label="Coba lagi" onClick={() => rewind(messages[i - 1], "retry")}>
+                        <RotateCcw className="size-3" />
+                        <span>Coba lagi</span>
+                      </MessageAction>
+                    )}
+                    {message.usage && (
+                      <span className="text-[10px] text-fg-subtle" title="Token yang dipakai untuk jawaban ini">
+                        {message.model && `${message.model} · `}
+                        {describeUsage(message.usage)}
+                      </span>
+                    )}
+                  </div>
                 )}
                 {busy && i === messages.length - 1 && (
                   <p className="flex items-center gap-1.5 text-xs text-fg-subtle">
@@ -442,7 +527,19 @@ export function AiChat({
           </div>
         ))}
         <div ref={bottom} />
+        </div>
       </div>
+
+      {!atBottom && (
+        <button
+          type="button"
+          onClick={toBottom}
+          className="absolute bottom-32 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-fg-muted shadow-md hover:text-fg"
+        >
+          <ArrowDown className="size-3.5" />
+          {busy ? "Ikuti jawaban" : "Ke pesan terbaru"}
+        </button>
+      )}
 
       <form
         onSubmit={(e) => {
@@ -451,21 +548,25 @@ export function AiChat({
         }}
         className={`border-t border-line ${layout === "page" ? "px-6 py-4 lg:px-10" : "p-3"}`}
       >
+        <div className={layout === "page" ? "mx-auto max-w-3xl" : ""}>
         {notice && <p className="mb-2 text-[11px] text-fg-muted">{notice}</p>}
         <div className="rounded-xl border border-line bg-surface focus-within:border-accent">
           <textarea
+            ref={textarea}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              // Not while an input method is composing a word (e.g. Japanese or Chinese IME).
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 void send(input);
               }
+              if (e.key === "Escape" && busy) abort.current?.abort();
             }}
             rows={2}
             placeholder="Tulis pesan… (Enter untuk kirim, Shift+Enter baris baru)"
             aria-label="Pesan untuk AI"
-            className="block max-h-48 min-h-12 w-full resize-none bg-transparent px-3 pt-2.5 text-sm outline-none placeholder:text-fg-subtle"
+            className="block min-h-12 w-full resize-none bg-transparent px-3 pt-2.5 text-sm outline-none placeholder:text-fg-subtle"
           />
           <div className="flex items-center gap-2 px-2 pb-2">
             <label className="relative flex min-w-0 items-center">
@@ -494,7 +595,7 @@ export function AiChat({
             </label>
             <div className="ml-auto">
               {busy ? (
-                <button type="button" onClick={() => abort.current?.abort()} aria-label="Hentikan" className="inline-flex size-8 items-center justify-center rounded-lg bg-fg text-page">
+                <button type="button" onClick={() => abort.current?.abort()} aria-label="Hentikan (Esc)" title="Hentikan (Esc)" className="inline-flex size-8 items-center justify-center rounded-lg bg-fg text-page">
                   <Square className="size-3" />
                 </button>
               ) : (
@@ -506,6 +607,7 @@ export function AiChat({
           </div>
         </div>
         <p className="mt-1.5 text-[10px] text-fg-subtle">AI bisa keliru. Periksa usulan sebelum diterapkan dan diterbitkan.</p>
+        </div>
       </form>
     </div>
   );
@@ -539,22 +641,30 @@ function IconButton({ label, onClick, active, children }: { label: string; onCli
 function TitleEditor({ title, editable, onRename }: { title: string; editable: boolean; onRename: (title: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(title);
+  const cancelled = useRef(false);
   if (editing) {
     return (
       <form
         className="min-w-0 flex-1"
         onSubmit={(e) => {
           e.preventDefault();
-          setEditing(false);
-          if (value.trim() && value !== title) onRename(value.trim());
+          // Saving happens on blur, so Enter and clicking away behave the same.
+          e.currentTarget.querySelector("input")?.blur();
         }}
       >
         <input
           autoFocus
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          onBlur={() => setEditing(false)}
-          onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
+          onBlur={() => {
+            setEditing(false);
+            if (!cancelled.current && value.trim() && value.trim() !== title) onRename(value.trim());
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            cancelled.current = true;
+            e.currentTarget.blur();
+          }}
           aria-label="Nama percakapan"
           className="h-7 w-full rounded-md border border-line bg-surface px-2 text-sm outline-none focus:border-accent"
         />
@@ -566,6 +676,7 @@ function TitleEditor({ title, editable, onRename }: { title: string; editable: b
       type="button"
       disabled={!editable}
       onClick={() => {
+        cancelled.current = false;
         setValue(title);
         setEditing(true);
       }}
@@ -574,6 +685,67 @@ function TitleEditor({ title, editable, onRename }: { title: string; editable: b
     >
       {title}
     </button>
+  );
+}
+
+/** What the agent looked up: the latest step while it works, a collapsible list afterwards. */
+function ToolSteps({ tools, live }: { tools: string[]; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (live) {
+    return (
+      <p className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
+        <Search className="size-3" />
+        {tools.at(-1)}
+        {tools.length > 1 && <span className="opacity-70">· langkah {tools.length}</span>}
+      </p>
+    );
+  }
+  return (
+    <div className="text-[11px] text-fg-subtle">
+      <button type="button" onClick={() => setOpen(!open)} className="flex items-center gap-1.5 hover:text-fg">
+        <Search className="size-3" />
+        {tools.length === 1 ? tools[0] : `${tools.length} langkah pencarian`}
+        {tools.length > 1 && <ChevronDown className={`size-3 transition-transform ${open ? "" : "-rotate-90"}`} />}
+      </button>
+      {open && tools.length > 1 && (
+        <ol className="mt-1 ml-[18px] list-decimal space-y-0.5 pl-3">
+          {tools.map((tool, i) => (
+            <li key={i}>{tool}</li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function MessageAction({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-fg-subtle hover:bg-fill hover:text-fg"
+    >
+      {children}
+    </button>
+  );
+}
+
+function CopyAction({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <MessageAction
+      label="Salin jawaban"
+      onClick={async () => {
+        if (!(await copyText(text))) return;
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+      <span>{copied ? "Disalin" : "Salin"}</span>
+    </MessageAction>
   );
 }
 
@@ -760,6 +932,7 @@ function ProposalCard({
   onDismiss: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [raw, setRaw] = useState(false);
   const [pending, setPending] = useState<ApplyMode | null>(null);
   const page = proposal.kind === "edit" ? current?.() : undefined;
   const done = proposal.status === "applied";
@@ -779,7 +952,15 @@ function ProposalCard({
         ];
 
   async function run(mode: ApplyMode) {
-    if (mode === "publish" && !confirm("Buat halaman ini dan langsung terbitkan?")) return;
+    if (
+      mode === "publish" &&
+      !(await confirmDialog({
+        title: "Buat dan langsung terbitkan?",
+        message: "Halaman baru ini langsung tampil untuk pengunjung. Pilih “Buat draf” bila ingin memeriksanya dulu.",
+        confirmLabel: "Buat & terbitkan",
+      }))
+    )
+      return;
     setPending(mode);
     await onApply(mode);
     setPending(null);
@@ -808,9 +989,33 @@ function ProposalCard({
               <span className="font-normal text-fg-subtle">· {proposal.contentMarkdown.length} karakter</span>
             </button>
             {open && (
-              <pre className="mt-1 max-h-64 overflow-auto rounded-lg border border-line bg-page p-2 font-mono text-[11px] whitespace-pre-wrap text-fg-muted">
-                {proposal.contentMarkdown}
-              </pre>
+              <div className="mt-1 overflow-hidden rounded-lg border border-line bg-page">
+                <div className="flex gap-1 border-b border-line px-2 py-1">
+                  {(
+                    [
+                      [false, "Pratinjau"],
+                      [true, "Markdown"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setRaw(value)}
+                      className={`rounded px-2 py-0.5 text-[11px] ${raw === value ? "bg-fill font-medium text-fg" : "text-fg-subtle hover:text-fg"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {raw ? (
+                  <pre className="max-h-80 overflow-auto p-2 font-mono text-[11px] whitespace-pre-wrap text-fg-muted">{proposal.contentMarkdown}</pre>
+                ) : (
+                  <div
+                    className="chat-prose max-h-80 overflow-auto p-3 text-sm leading-relaxed text-fg"
+                    dangerouslySetInnerHTML={{ __html: renderChatMarkdown(previewMarkdown(proposal.contentMarkdown)) }}
+                  />
+                )}
+              </div>
             )}
           </div>
         )}

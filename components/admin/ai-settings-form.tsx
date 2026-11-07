@@ -5,6 +5,7 @@ import { Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { fetchAiModels, saveAiSettings, testAiConnection, type AiForm } from "@/app/admin/_actions/ai";
 import { AI_PRESETS, type AiProvider, type AiSettingsView } from "@/lib/ai/presets";
 import { Alert, Button, Field, Input, Panel, Select } from "@/components/admin/ui";
+import { confirmDialog } from "@/components/admin/dialog";
 
 export function AiSettingsForm({ initial }: { initial: AiSettingsView }) {
   const [view, setView] = useState(initial);
@@ -118,10 +119,10 @@ export function AiSettingsForm({ initial }: { initial: AiSettingsView }) {
         <div>
           <h2 className="flex items-center gap-2 text-sm font-medium">
             <Sparkles className="size-4 text-accent" />
-            AI Write
+            Koneksi AI
           </h2>
           <p className="mt-1 text-xs text-fg-subtle">
-            Bantuan menulis di editor: perintah <code>/ai</code>, tombol AI saat teks dipilih, dan deskripsi otomatis.
+            Satu penyedia untuk semua fitur AI: AI Write di editor (<code>/ai</code>, teks terpilih), AI Chat, otomatisasi saat terbit, dan Tanya AI.
           </p>
         </div>
         <label className="flex shrink-0 items-center gap-2 text-sm">
@@ -257,7 +258,19 @@ export function AiSettingsForm({ initial }: { initial: AiSettingsView }) {
           Tes koneksi
         </Button>
         {view.hasKey && !view.keyFromEnv && (
-          <Button variant="ghost" onClick={() => confirm("Hapus API key yang tersimpan?") && save({ apiKey: "", clearKey: true })} disabled={pending}>
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              const ok = await confirmDialog({
+                title: "Hapus API key yang tersimpan?",
+                message: "Fitur AI berhenti bekerja sampai Anda mengisi key baru.",
+                confirmLabel: "Hapus API key",
+                tone: "danger",
+              });
+              if (ok) save({ apiKey: "", clearKey: true });
+            }}
+            disabled={pending}
+          >
             Hapus API key
           </Button>
         )}

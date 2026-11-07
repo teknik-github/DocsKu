@@ -8,6 +8,7 @@ import { formatDateTime } from "@/components/admin/format";
 import { Alert, Button, Field, Input, Panel, Select } from "@/components/admin/ui";
 import { copyText } from "@/lib/copy-text";
 import { MCP_SCOPES, type McpScope } from "@/lib/mcp/scopes";
+import { confirmDialog } from "@/components/admin/dialog";
 
 export type TokenRow = {
   id: string;
@@ -102,8 +103,14 @@ export function McpTokens({ endpoint, tokens }: { endpoint: string; tokens: Toke
     });
   }
 
-  function revoke(token: TokenRow) {
-    if (!confirm(`Cabut token "${token.name}"? Aplikasi yang memakainya langsung kehilangan akses.`)) return;
+  async function revoke(token: TokenRow) {
+    const ok = await confirmDialog({
+      title: `Cabut token “${token.name}”?`,
+      message: "Aplikasi yang memakainya langsung kehilangan akses. Tindakan ini tidak bisa dibatalkan.",
+      confirmLabel: "Cabut token",
+      tone: "danger",
+    });
+    if (!ok) return;
     startTransition(async () => {
       const result = await revokeApiToken(token.id);
       if (!result.ok) setError(result.error);

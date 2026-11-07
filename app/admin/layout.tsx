@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DialogHost } from "@/components/admin/dialog";
 
 export const metadata: Metadata = {
   title: { default: "Dashboard", template: "%s · Dashboard" },
@@ -10,5 +11,17 @@ export const metadata: Metadata = {
 export const instant = false;
 
 export default function AdminRootLayout({ children }: LayoutProps<"/admin">) {
-  return children;
+  return (
+    <>
+      {/* Before first paint: a collapsed sidebar (cookie) also narrows the loading skeleton. */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `if(/(?:^|; )docsku_sidebar=collapsed/.test(document.cookie))document.documentElement.classList.add("sidebar-collapsed")`,
+        }}
+      />
+      {children}
+      {/* confirmDialog()/promptDialog() from components/admin/dialog.tsx render here. */}
+      <DialogHost />
+    </>
+  );
 }

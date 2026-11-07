@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 
 /**
@@ -97,55 +97,6 @@ export async function listCommentablePages() {
     .orderBy(asc(schema.pages.title));
 }
 
-export type AdminComment = {
-  id: string;
-  parentId: string | null;
-  parentName: string | null;
-  pageId: string;
-  pageTitle: string;
-  pageSlug: string;
-  pagePublished: boolean;
-  name: string;
-  email: string | null;
-  body: string;
-  staff: boolean;
-  status: CommentStatus;
-  createdAt: string;
-  replies: number;
-};
-
-/** Comments with a status for the dashboard, newest first, plus counts per status. */
-export async function listCommentsForAdmin(status: CommentStatus) {
-  const c = schema.pageComments;
-  const p = schema.pages;
-  const parent = sql`parent`;
-  const rows = await db
-    .select({
-      id: c.id,
-      parentId: c.parentId,
-      parentName: sql<string | null>`(select author_name from page_comments ${parent} where ${parent}.id = ${c.parentId})`,
-      pageId: c.pageId,
-      pageTitle: p.title,
-      pageSlug: p.slug,
-      pagePublished: sql<boolean>`${p.status} = 'published'`,
-      name: c.authorName,
-      email: c.authorEmail,
-      body: c.body,
-      staff: c.isStaff,
-      status: c.status,
-      createdAt: c.createdAt,
-      replies: sql<number>`(select count(*)::int from page_comments r where r.parent_id = ${c.id})`,
-    })
-    .from(c)
-    .innerJoin(p, eq(p.id, c.pageId))
-    .where(eq(c.status, status))
-    .orderBy(desc(c.createdAt))
-    .limit(200);
-  const counts = await db.select({ status: c.status, n: count() }).from(c).groupBy(c.status);
-  const total = Object.fromEntries(COMMENT_STATUSES.map((s) => [s, counts.find((row) => row.status === s)?.n ?? 0])) as Record<CommentStatus, number>;
-  return { items: rows.map((row): AdminComment => ({ ...row, createdAt: row.createdAt.toISOString() })), counts: total };
-}
-
 export async function setCommentStatus(ids: string[], status: CommentStatus) {
   const c = schema.pageComments;
   await db
@@ -180,4 +131,92 @@ export async function addStaffReply(commentId: string, name: string, body: strin
 
 export async function deleteComment(id: string) {
   await db.delete(schema.pageComments).where(eq(schema.pageComments.id, id));
+}
+
+/** What the dashboard's Komentar tabs show: threads awaiting a team reply, or threads holding comments of one status. */
+export const COMMENT_VIEWS = ["unanswered", "pending", "approved", "spam"] as const;
+export type CommentView = (typeof COMMENT_VIEWS)[number];
+
+export type ThreadMessage = {
+  id: string;
+  parentId: string | null;
+  name: string;
+  email: string | null;
+  body: string;
+  staff: boolean;
+  status: CommentStatus;
+  createdAt: string;
+};
+export type CommentThread = {
+  id: string;
+  pageId: string;
+  pageTitle: string;
+  pageSlug: string;
+  pagePublished: boolean;
+  lastAt: string;
+  messages: ThreadMessage[];
+};
+
+/**
+ * Whole conversations (a top-level comment and its replies) for the dashboard,
+ * latest activity first. "unanswered": the newest non-spam message is a
+ * visitor's. Otherwise: threads holding a comment with that status. Spam
+ * messages only appear in the spam tab.
+ */
+export async function listThreadsForAdmin(view: CommentView) {
+  const rows = await db.execute<{
+    id: string;
+    parent_id: string | null;
+    root: string;
+    page_id: string;
+    page_title: string;
+    page_slug: string;
+    page_published: boolean;
+    author_name: string;
+    author_email: string | null;
+    body: string;
+    is_staff: boolean;
+    status: CommentStatus;
+    created_at: Date | string;
+  }>(sql`
+    with t as (select c.*, coalesce(c.parent_id, c.id) as root from page_comments c),
+    latest as (
+      select distinct on (root) root, is_staff from t where status <> 'spam' order by root, created_at desc
+    ),
+    roots as (
+      select t.root, max(t.created_at) as last_at from t
+      where ${
+        view === "unanswered"
+          ? sql`t.status <> 'spam' and t.root in (select root from latest where not is_staff)`
+          : sql`t.root in (select root from t where status = ${view})`
+      }
+      group by t.root order by last_at desc limit 100
+    )
+    select t.id, t.parent_id, t.root, t.page_id, p.title as page_title, p.slug as page_slug, (p.status = 'published') as page_published,
+      t.author_name, t.author_email, t.body, t.is_staff, t.status, t.created_at
+    from t join roots r on r.root = t.root join pages p on p.id = t.page_id
+    where ${view === "spam" ? sql`true` : sql`t.status <> 'spam'`}
+    order by r.last_at desc, t.created_at asc`);
+
+  const threads = new Map<string, CommentThread>();
+  for (const row of rows) {
+    const createdAt = new Date(row.created_at).toISOString();
+    let thread = threads.get(row.root);
+    if (!thread) {
+      thread = { id: row.root, pageId: row.page_id, pageTitle: row.page_title, pageSlug: row.page_slug, pagePublished: row.page_published, lastAt: createdAt, messages: [] };
+      threads.set(row.root, thread);
+    }
+    if (createdAt > thread.lastAt) thread.lastAt = createdAt;
+    thread.messages.push({ id: row.id, parentId: row.parent_id, name: row.author_name, email: row.author_email, body: row.body, staff: row.is_staff, status: row.status, createdAt });
+  }
+
+  const [counts] = await db.execute<Record<CommentView, number>>(sql`
+    with t as (select c.*, coalesce(c.parent_id, c.id) as root from page_comments c),
+    latest as (select distinct on (root) root, is_staff from t where status <> 'spam' order by root, created_at desc)
+    select
+      (select count(*) from latest where not is_staff)::int as unanswered,
+      (select count(*) from page_comments where status = 'pending')::int as pending,
+      (select count(*) from page_comments where status = 'approved')::int as approved,
+      (select count(*) from page_comments where status = 'spam')::int as spam`);
+  return { threads: [...threads.values()], counts: counts ?? { unanswered: 0, pending: 0, approved: 0, spam: 0 } };
 }

@@ -7,6 +7,7 @@ import { deleteMedia } from "@/app/admin/_actions/site";
 import { uploadImage } from "@/components/admin/editor/image-dialog";
 import { formatBytes, formatDateTime } from "@/components/admin/format";
 import { Alert, Button, Panel } from "@/components/admin/ui";
+import { confirmDialog } from "@/components/admin/dialog";
 
 type Item = {
   id: string;
@@ -46,8 +47,14 @@ export function MediaLibrary({ items }: { items: Item[] }) {
     setTimeout(() => setCopied(null), 1500);
   }
 
-  function remove(item: Item) {
-    if (!confirm(`Hapus ${item.originalName}? Halaman yang memakainya akan menampilkan gambar rusak.`)) return;
+  async function remove(item: Item) {
+    const ok = await confirmDialog({
+      title: `Hapus ${item.originalName}?`,
+      message: "Halaman yang memakai gambar ini akan menampilkan gambar rusak.",
+      confirmLabel: "Hapus gambar",
+      tone: "danger",
+    });
+    if (!ok) return;
     startTransition(async () => {
       const result = await deleteMedia(item.id);
       if (!result.ok) setError(result.error);

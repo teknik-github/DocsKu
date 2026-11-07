@@ -7,6 +7,7 @@ import { ArrowRight, Trash2 } from "lucide-react";
 import { createRedirect, deleteRedirect } from "@/app/admin/_actions/redirects";
 import { formatDateTime } from "@/components/admin/format";
 import { Alert, Button, Field, Input, Panel } from "@/components/admin/ui";
+import { confirmDialog } from "@/components/admin/dialog";
 
 export type RedirectRow = {
   id: string;
@@ -46,8 +47,14 @@ export function RedirectsManager({ rows }: { rows: RedirectRow[] }) {
     });
   }
 
-  function remove(row: RedirectRow) {
-    if (!confirm(`Hapus redirect dari ${row.from}? Pengunjung alamat itu akan mendapat halaman tidak ditemukan.`)) return;
+  async function remove(row: RedirectRow) {
+    const ok = await confirmDialog({
+      title: "Hapus redirect ini?",
+      message: `Pengunjung ${row.from} akan mendapat halaman tidak ditemukan.`,
+      confirmLabel: "Hapus redirect",
+      tone: "danger",
+    });
+    if (!ok) return;
     startTransition(async () => {
       const result = await deleteRedirect(row.id);
       if (!result.ok) return setMessage({ tone: "error", text: result.error });

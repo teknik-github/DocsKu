@@ -1,8 +1,9 @@
 "use client";
 
 import { createContext, use, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { CornerDownLeft, FileText, Hash, Search } from "lucide-react";
+import { CornerDownLeft, FileText, Hash, Search, Sparkles } from "lucide-react";
 import type { SearchEntry } from "@/lib/site-types";
 import { beacon } from "@/components/reader-footer";
 
@@ -14,6 +15,10 @@ type Result = {
 };
 
 const SearchContext = createContext<() => void>(() => {});
+
+// Loaded when a visitor asks, so the Markdown renderer stays out of every page's bundle.
+const AskAnswer = dynamic(() => import("@/components/ask-ai"), { ssr: false });
+const MIN_QUESTION = 3;
 
 type PendingQuery = { query: string; found: boolean } | null;
 
@@ -66,9 +71,12 @@ function search(index: SearchEntry[], query: string): Result[] {
 
 export function SearchProvider({
   index,
+  ai = false,
   children,
 }: {
   index: SearchEntry[];
+  /** Offer "Tanya AI" (an answer from the docs) above the results. */
+  ai?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -87,17 +95,23 @@ export function SearchProvider({
   return (
     <SearchContext value={() => setOpen(true)}>
       {children}
-      {open && <SearchDialog index={index} onClose={() => setOpen(false)} />}
+      {open && <SearchDialog index={index} ai={ai} onClose={() => setOpen(false)} />}
     </SearchContext>
   );
 }
 
-function SearchDialog({ index, onClose }: { index: SearchEntry[]; onClose: () => void }) {
+function SearchDialog({ index, ai, onClose }: { index: SearchEntry[]; ai: boolean; onClose: () => void }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  /** The question being answered by AI, shown instead of the results. */
+  const [asked, setAsked] = useState<string | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const results = search(index, query);
+  const canAsk = ai && query.trim().length >= MIN_QUESTION;
+  // With "Tanya AI" on, it is row 0 and the results follow.
+  const offset = canAsk ? 1 : 0;
+  const rows = results.length + offset;
   const pending = useRef<PendingQuery>(null);
   const reported = useRef(new Set<string>());
 
@@ -124,18 +138,33 @@ function SearchDialog({ index, onClose }: { index: SearchEntry[]; onClose: () =>
     router.push(result.href);
   }
 
+  function navigate(href: string) {
+    onClose();
+    router.push(href);
+  }
+
+  function choose(i: number) {
+    if (canAsk && i === 0) setAsked(query.trim());
+    else go(results[i - offset]);
+  }
+
   function onKeyDown(event: React.KeyboardEvent) {
-    if (event.key === "ArrowDown") {
+    if (event.key === "Escape") {
+      onClose();
+    } else if (asked !== null) {
+      if (event.key === "Enter" && query.trim() !== asked && query.trim().length >= MIN_QUESTION) {
+        event.preventDefault();
+        setAsked(query.trim());
+      }
+    } else if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActive((i) => Math.min(i + 1, results.length - 1));
+      setActive((i) => Math.min(i + 1, rows - 1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       setActive((i) => Math.max(i - 1, 0));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      go(results[active]);
-    } else if (event.key === "Escape") {
-      onClose();
+      choose(active);
     }
   }
 
@@ -159,22 +188,50 @@ function SearchDialog({ index, onClose }: { index: SearchEntry[]; onClose: () =>
             onChange={(event) => {
               setQuery(event.target.value);
               setActive(0);
+              setAsked(null);
             }}
             onKeyDown={onKeyDown}
-            placeholder="Cari dokumentasi…"
+            placeholder={ai ? "Cari atau tanyakan sesuatu…" : "Cari dokumentasi…"}
             className="h-12 w-full bg-transparent text-sm text-fg outline-none placeholder:text-fg-subtle"
           />
           <kbd className="rounded border border-line px-1.5 py-0.5 font-sans text-[11px] text-fg-subtle">
             Esc
           </kbd>
         </div>
+        {asked !== null ? (
+          <AskAnswer key={asked} question={asked} onBack={() => setAsked(null)} onNavigate={navigate} />
+        ) : (
         <ul ref={listRef} className="max-h-[60vh] overflow-y-auto p-2">
-          {results.length === 0 && (
-            <li className="px-3 py-8 text-center text-sm text-fg-subtle">
-              Tidak ada hasil untuk “{query}”.
+          {canAsk && (
+            <li>
+              <button
+                type="button"
+                data-index={0}
+                onMouseMove={() => setActive(0)}
+                onClick={() => choose(0)}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left ${active === 0 ? "bg-fill" : ""}`}
+              >
+                <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent">
+                  <Sparkles className="size-3.5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-fg">
+                    Tanya AI: <span className="font-medium">“{query.trim()}”</span>
+                  </span>
+                  <span className="block truncate text-xs text-fg-subtle">Jawaban langsung dari isi dokumentasi</span>
+                </span>
+                {active === 0 && <CornerDownLeft className="size-3.5 shrink-0 text-fg-subtle" />}
+              </button>
             </li>
           )}
-          {results.map((result, i) => (
+          {results.length === 0 && (
+            <li className="px-3 py-8 text-center text-sm text-fg-subtle">
+              {canAsk ? "Tidak ada judul yang cocok. Pilih Tanya AI untuk mencari di isi dokumentasi." : `Tidak ada hasil untuk “${query}”.`}
+            </li>
+          )}
+          {results.map((result, j) => {
+            const i = j + offset;
+            return (
             <li key={result.href}>
               <button
                 type="button"
@@ -197,14 +254,16 @@ function SearchDialog({ index, onClose }: { index: SearchEntry[]; onClose: () =>
                 {i === active && <CornerDownLeft className="size-3.5 shrink-0 text-fg-subtle" />}
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
+        )}
       </div>
     </div>
   );
 }
 
-export function SearchField({ className = "" }: { className?: string }) {
+export function SearchField({ className = "", label = "Cari" }: { className?: string; label?: string }) {
   const openSearch = use(SearchContext);
   return (
     <button
@@ -213,7 +272,7 @@ export function SearchField({ className = "" }: { className?: string }) {
       className={`flex h-9 w-full items-center gap-2 rounded-lg border border-line bg-surface/60 px-3 text-sm text-fg-subtle transition-colors hover:border-line-strong ${className}`}
     >
       <Search className="size-4" />
-      <span className="flex-1 text-left">Cari</span>
+      <span className="flex-1 truncate text-left">{label}</span>
       <kbd className="flex items-center gap-0.5 font-sans text-[11px]">
         <span className="rounded border border-line px-1">Ctrl</span>
         <span className="rounded border border-line px-1">K</span>

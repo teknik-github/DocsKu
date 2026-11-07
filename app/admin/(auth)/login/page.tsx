@@ -10,7 +10,11 @@ export const metadata = { title: "Masuk" };
 
 export default function LoginPage({ searchParams }: PageProps<"/admin/login">) {
   return (
-    <AuthCard title="Masuk" description="Masuk ke dashboard dokumentasi.">
+    <AuthCard
+      title="Masuk ke akun Anda"
+      description="Masukkan email dan password untuk membuka dashboard dokumentasi."
+      footer="Lupa password atau belum punya akun? Minta admin tim Anda untuk mengatur ulang atau menambahkan akun."
+    >
       <Suspense fallback={<div className="h-56" />}>
         <LoginGate searchParams={searchParams} />
       </Suspense>

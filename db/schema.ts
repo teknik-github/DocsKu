@@ -265,6 +265,22 @@ export const searchQueries = pgTable(
 );
 
 /**
+ * Questions visitors asked "Tanya AI" in the search box, per Asia/Jakarta day.
+ * `misses` counts answers where the docs had nothing on it. The sum of `asks`
+ * for today is also the daily limit's counter, so it survives restarts.
+ */
+export const askAiQueries = pgTable(
+  "ask_ai_queries",
+  {
+    query: text("query").notNull(),
+    day: date("day").notNull(),
+    asks: integer("asks").notNull().default(0),
+    misses: integer("misses").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.query, t.day] }), index("ask_ai_queries_day_idx").on(t.day)],
+);
+
+/**
  * Public comments under published doc pages. Visitors' comments wait for
  * approval only when manual moderation is on; replies are one level deep. The email is
  * only ever shown in the dashboard.

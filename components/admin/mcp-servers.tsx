@@ -6,6 +6,7 @@ import { deleteMcpServer, saveMcpServer, setMcpEnabled, type McpServerForm } fro
 import type { McpServerView } from "@/lib/mcp/external";
 import { formatDateTime } from "@/components/admin/format";
 import { Alert, Button, Field, Input, Panel } from "@/components/admin/ui";
+import { confirmDialog } from "@/components/admin/dialog";
 
 const EMPTY: McpServerForm = { name: "", url: "", headerName: "Authorization", headerValue: "" };
 
@@ -41,8 +42,14 @@ export function McpServers({ initial }: { initial: McpServerView[] }) {
     });
   }
 
-  function remove(server: McpServerView) {
-    if (!confirm(`Hapus server MCP "${server.name}"? AI Chat tidak bisa lagi memakai tool-nya.`)) return;
+  async function remove(server: McpServerView) {
+    const ok = await confirmDialog({
+      title: `Hapus server MCP “${server.name}”?`,
+      message: "AI Chat tidak bisa lagi memakai tool-nya.",
+      confirmLabel: "Hapus server",
+      tone: "danger",
+    });
+    if (!ok) return;
     startTransition(async () => {
       const result = await deleteMcpServer(server.id);
       if (!result.ok) return setMessage({ tone: "error", text: result.error });

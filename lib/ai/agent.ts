@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, ilike, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import type { AiConfig } from "@/lib/ai/config";
@@ -12,6 +12,8 @@ import type { AgentEvent, CurrentPage, Proposal } from "@/lib/ai/chat-types";
 import { callExternalTool, externalAgentTools, type ExternalTools } from "@/lib/mcp/external";
 import { partialStringFields } from "@/lib/ai/partial-json";
 import { pageWritingGuide } from "@/lib/ai/writing-guide";
+import { stem, terms } from "@/lib/ai/ask";
+import { textOf } from "@/lib/content/doc";
 
 export type { AgentEvent, CurrentPage, Proposal };
 
@@ -21,7 +23,58 @@ export type { AgentEvent, CurrentPage, Proposal };
  * proposal: the dashboard shows it and the user decides whether to apply it.
  */
 
-const MAX_TURNS = 6;
+const MAX_TURNS = 8;
+/** search_pages results. */
+const SEARCH_RESULTS = 8;
+
+/**
+ * Every doc page (drafts included, working copy), ranked by how well it covers the
+ * query's words in its title, description and body, with a snippet around the
+ * first hit. Words are matched loosely ("instal" finds "instalasi"/"install").
+ */
+async function searchPages(query: string) {
+  const wanted = terms(query).map(stem);
+  if (wanted.length === 0) return [];
+  const rows = await db
+    .select({
+      title: schema.pages.draftTitle,
+      slug: schema.pages.slug,
+      status: schema.pages.status,
+      description: schema.pages.draftDescription,
+      content: schema.pages.draftContent,
+    })
+    .from(schema.pages)
+    .where(eq(schema.pages.kind, "doc"));
+  return rows
+    .map((row) => {
+      const body = textOf(row.content);
+      const title = new Set(terms(`${row.title} ${row.slug.replace(/[/-]/g, " ")}`).map(stem));
+      const description = new Set(terms(row.description).map(stem));
+      const words = terms(body).map(stem);
+      let score = 0;
+      let matched = 0;
+      for (const term of wanted) {
+        const hits = words.filter((w) => w === term).length;
+        const inTitle = title.has(term);
+        const inDescription = description.has(term);
+        if (!hits && !inTitle && !inDescription) continue;
+        matched++;
+        score += (inTitle ? 4 : 0) + (inDescription ? 2 : 0) + Math.log(1 + hits);
+      }
+      // A snippet around the first place a query word appears in the body.
+      const lower = body.toLowerCase();
+      const at = Math.min(...wanted.map((term) => lower.indexOf(term)).filter((i) => i >= 0), Infinity);
+      const snippet = at === Infinity ? body.slice(0, 160) : body.slice(Math.max(0, at - 60), at + 160);
+      return {
+        score: score * (matched / wanted.length),
+        page: { title: row.title || "Tanpa judul", slug: row.slug, status: row.status, description: row.description, snippet: snippet.replace(/\s+/g, " ").trim() },
+      };
+    })
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, SEARCH_RESULTS)
+    .map((r) => r.page);
+}
 const MAX_CONTENT = 60_000;
 /** Proposal tools whose arguments are shown live while the model writes them. */
 const DRAFTED: Record<string, Proposal["kind"]> = { propose_new_page: "new", propose_page_edit: "edit" };
@@ -80,7 +133,9 @@ Anda membantu: ide topik dan kerangka, judul alternatif, menulis dan menyunting 
 
 Cara kerja:
 - Balas dalam bahasa pengguna (bawaan: Bahasa Indonesia). Jawaban chat singkat, jelas, dan langsung ke inti.
-- Gunakan tool search_pages, read_page, dan get_site_structure untuk melihat isi situs sebelum menyarankan, bila relevan.
+- Gunakan tool search_pages, read_page, dan get_site_structure untuk melihat isi situs sebelum menyarankan, bila relevan. search_pages mencari kata per kata di judul, deskripsi, dan isi; pakai kata kunci pendek (2–4 kata).
+- Pertanyaan tentang isi dokumentasi: cari dan baca halaman yang relevan dulu, jawab berdasarkan isinya, dan tautkan sumbernya dengan format [Judul halaman](/docs/slug). Bila dokumentasi tidak membahasnya, katakan terus terang.
+- Sebelum mengusulkan halaman baru, cari dulu apakah topiknya sudah ada. Bila sudah, beri tahu pengguna dan tawarkan memperbarui halaman itu, kecuali pengguna memang meminta halaman terpisah.
 - Anda TIDAK PERNAH mengubah atau menerbitkan apa pun sendiri. Untuk halaman baru panggil propose_new_page${
     hasPage ? "; untuk mengubah halaman yang sedang dibuka panggil propose_page_edit" : ""
   }. Pengguna yang memutuskan menerapkan usulan. Setelah memanggilnya, ringkas usulan Anda dalam 1–3 kalimat.
@@ -264,24 +319,11 @@ async function runTool(
   switch (name) {
     case "search_pages": {
       const query = String((args as { query?: unknown }).query ?? "").trim().slice(0, 100);
-      const term = `%${query.replace(/[%_\\]/g, "\\$&")}%`;
-      const rows = await db
-        .select({
-          title: schema.pages.draftTitle,
-          slug: schema.pages.slug,
-          status: schema.pages.status,
-          description: schema.pages.draftDescription,
-        })
-        .from(schema.pages)
-        .where(
-          and(
-            eq(schema.pages.kind, "doc"),
-            or(ilike(schema.pages.draftTitle, term), ilike(schema.pages.slug, term), ilike(schema.pages.draftDescription, term)),
-          ),
-        )
-        .orderBy(asc(schema.pages.slug))
-        .limit(10);
-      return { result: JSON.stringify(rows), label: `Mencari halaman “${query}”` };
+      const rows = await searchPages(query);
+      return {
+        result: rows.length ? JSON.stringify(rows) : `Tidak ada halaman yang membahas "${query}". Coba kata lain, atau lihat get_site_structure.`,
+        label: `Mencari “${query}” · ${rows.length} hasil`,
+      };
     }
     case "read_page": {
       const slug = String((args as { slug?: unknown }).slug ?? "").replace(/^\/?docs\//, "").trim();
@@ -415,7 +457,15 @@ export async function runAgent({
       draft.at = now;
       if (event.title !== undefined || event.description !== undefined || event.content !== undefined || force) emit(event);
     };
-    for await (const part of streamAgentTurn(config, messages, tools, { maxTokens: Math.max(config.maxTokens, 8000), signal })) {
+    // The last turn may not call tools: the user always gets an answer from what was found.
+    const last = turn === MAX_TURNS - 1;
+    if (last) {
+      messages.push({
+        role: "user",
+        content: "[Sistem] Batas langkah hampir habis. Jangan memanggil tool lagi: jawab pengguna sekarang dengan informasi yang sudah Anda kumpulkan, dan sebutkan bila ada yang belum sempat diperiksa.",
+      });
+    }
+    for await (const part of streamAgentTurn(config, messages, tools, { maxTokens: Math.max(config.maxTokens, 8000), signal, toolChoice: last ? "none" : "auto" })) {
       if (part.type === "reasoning") {
         if (!thinking) emit({ t: "thinking" });
         thinking = true;
@@ -434,6 +484,12 @@ export async function runAgent({
     // Send the rest of each draft before its tool runs.
     if (!signal.aborted) end?.toolCalls.forEach((call, index) => drafts.has(index) && sendDraft(index, call.name, call.arguments, true));
     if (!end || end.toolCalls.length === 0 || signal.aborted) {
+      reportUsage();
+      return;
+    }
+    if (last) {
+      // The provider ignored tool_choice "none": stop here rather than run tools nobody will read.
+      if (!end.text) emit({ t: "text", v: "Saya belum sempat menyusun jawaban dari hasil pencarian. Kirim “lanjutkan” untuk meneruskan." });
       reportUsage();
       return;
     }
@@ -456,6 +512,5 @@ export async function runAgent({
       messages.push({ role: "tool", tool_call_id: call.id, content: result });
     }
   }
-  emit({ t: "text", v: "\n\n(Batas langkah agen tercapai. Lanjutkan dengan pesan berikutnya.)" });
   reportUsage();
 }

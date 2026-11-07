@@ -39,6 +39,192 @@
   color-scheme: dark;
 }
 
+/* ---------- Colour themes ----------
+   Chosen in Tema (site setting colorTheme), applied as <html data-color>. The default
+   (terakota) is the :root/.dark palette above. Keep white text on --accent at 4.5:1 or more,
+   and keep the ids in sync with lib/color-themes.ts. */
+
+:root[data-color="samudra"] {
+  --page: #f7f9fc;
+  --surface: #ffffff;
+  --fill: #edf1f7;
+  --fill-hover: #e3e9f2;
+  --line: #dfe5ee;
+  --line-strong: #cbd3df;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: #dde8fb;
+  --code-bg: #f2f5fa;
+}
+:root.dark[data-color="samudra"] {
+  --page: #181b21;
+  --surface: #1f232b;
+  --fill: #282d36;
+  --fill-hover: #313742;
+  --line: #2f3540;
+  --line-strong: #3e4552;
+  --accent: #2f6bdc;
+  --accent-strong: #2559c2;
+  --accent-soft: #1d2a45;
+  --code-bg: #1f232b;
+}
+
+:root[data-color="zamrud"] {
+  --page: #f6faf7;
+  --surface: #ffffff;
+  --fill: #e9f2ec;
+  --fill-hover: #dfebe3;
+  --line: #dbe6df;
+  --line-strong: #c6d4cb;
+  --accent: #047857;
+  --accent-strong: #065f46;
+  --accent-soft: #d3eee2;
+  --code-bg: #f1f7f3;
+}
+:root.dark[data-color="zamrud"] {
+  --page: #18201c;
+  --surface: #1e2722;
+  --fill: #27312b;
+  --fill-hover: #303b35;
+  --line: #2e3832;
+  --line-strong: #3d4942;
+  --accent: #0c7f5e;
+  --accent-strong: #096b4f;
+  --accent-soft: #183429;
+  --code-bg: #1e2722;
+}
+
+:root[data-color="toska"] {
+  --page: #f5fafb;
+  --surface: #ffffff;
+  --fill: #e8f2f4;
+  --fill-hover: #dcebee;
+  --line: #d8e6e9;
+  --line-strong: #c3d5d9;
+  --accent: #0e7490;
+  --accent-strong: #155e75;
+  --accent-soft: #d4ecf2;
+  --code-bg: #f0f7f8;
+}
+:root.dark[data-color="toska"] {
+  --page: #172023;
+  --surface: #1d282b;
+  --fill: #263235;
+  --fill-hover: #2f3c40;
+  --line: #2d393c;
+  --line-strong: #3c4a4e;
+  --accent: #1a8199;
+  --accent-strong: #146b80;
+  --accent-soft: #15333b;
+  --code-bg: #1d282b;
+}
+
+:root[data-color="anggur"] {
+  --page: #f9f8fd;
+  --surface: #ffffff;
+  --fill: #efedf7;
+  --fill-hover: #e6e2f3;
+  --line: #e2def0;
+  --line-strong: #cfc9e2;
+  --accent: #7c3aed;
+  --accent-strong: #6d28d9;
+  --accent-soft: #ebe2fd;
+  --code-bg: #f4f2fa;
+}
+:root.dark[data-color="anggur"] {
+  --page: #1d1b24;
+  --surface: #24222d;
+  --fill: #2d2a38;
+  --fill-hover: #363343;
+  --line: #34303f;
+  --line-strong: #443f52;
+  --accent: #7f4ff0;
+  --accent-strong: #6d3be0;
+  --accent-soft: #2c2446;
+  --code-bg: #24222d;
+}
+
+:root[data-color="mawar"] {
+  --page: #fdf8f9;
+  --surface: #ffffff;
+  --fill: #f6ecee;
+  --fill-hover: #f0e1e4;
+  --line: #ecdde1;
+  --line-strong: #dccad0;
+  --accent: #e11d48;
+  --accent-strong: #be123c;
+  --accent-soft: #fbdfe6;
+  --code-bg: #faf2f4;
+}
+:root.dark[data-color="mawar"] {
+  --page: #221a1c;
+  --surface: #2a2023;
+  --fill: #33282b;
+  --fill-hover: #3d3034;
+  --line: #3b2f32;
+  --line-strong: #4c3d41;
+  --accent: #d92d52;
+  --accent-strong: #bd2145;
+  --accent-soft: #42212a;
+  --code-bg: #2a2023;
+}
+
+:root[data-color="amber"] {
+  --page: #fcfaf5;
+  --surface: #ffffff;
+  --fill: #f4eee1;
+  --fill-hover: #ede5d3;
+  --line: #e8e0cd;
+  --line-strong: #d6ccb6;
+  --accent: #b45309;
+  --accent-strong: #92400e;
+  --accent-soft: #f8e6cc;
+  --code-bg: #f8f4ea;
+}
+:root.dark[data-color="amber"] {
+  --page: #211d17;
+  --surface: #29241d;
+  --fill: #322c24;
+  --fill-hover: #3c352b;
+  --line: #3a3329;
+  --line-strong: #4b4336;
+  --accent: #b25a0e;
+  --accent-strong: #994c0b;
+  --accent-soft: #3f2c14;
+  --code-bg: #29241d;
+}
+
+:root[data-color="grafit"] {
+  --page: #fafafa;
+  --surface: #ffffff;
+  --fill: #f0f0f1;
+  --fill-hover: #e6e6e8;
+  --line: #e4e4e7;
+  --line-strong: #d1d1d6;
+  --accent: #3f3f46;
+  --accent-strong: #27272a;
+  --accent-soft: #e9e9ec;
+  --code-bg: #f4f4f5;
+  --fg: #18181b;
+  --fg-muted: #52525b;
+  --fg-subtle: #80808a;
+}
+:root.dark[data-color="grafit"] {
+  --page: #1c1c1e;
+  --surface: #232326;
+  --fill: #2c2c30;
+  --fill-hover: #35353a;
+  --line: #333338;
+  --line-strong: #44444a;
+  --accent: #6b6b74;
+  --accent-strong: #56565e;
+  --accent-soft: #2e2e33;
+  --code-bg: #232326;
+  --fg: #f4f4f5;
+  --fg-muted: #c4c4ca;
+  --fg-subtle: #9a9aa2;
+}
+
 @theme inline {
   --color-page: var(--page);
   --color-surface: var(--surface);

@@ -8,7 +8,8 @@ import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
 import { EMPTY_DOC } from "@/lib/content/doc";
 import { PLACEHOLDER_SLUG, slugify, uniqueSlug } from "@/lib/slug";
-import { NO_NAV, resolveSection } from "@/lib/automation";
+import { NO_NAV, readNavigation, resolveSection, writeNavigation } from "@/lib/automation";
+import { findCategory, placePages } from "@/lib/categories";
 import { forgetRedirects, recordSlugChange } from "@/lib/redirects";
 import {
   NOT_FOUND,
@@ -35,9 +36,17 @@ function refreshPublicSite() {
   forgetRedirects();
 }
 
-export async function createPage() {
+/**
+ * New empty draft, opened in the editor. With a `category` field (a navigation
+ * section id, from Halaman → a category) the page is listed in that category at
+ * once: drafts stay off the public site, and automation won't move it on publish.
+ */
+export async function createPage(formData?: FormData) {
   const user = await authorize();
   if ("error" in user) redirect("/admin/login");
+  const wanted = formData?.get("category");
+  const navigation = typeof wanted === "string" && wanted ? await readNavigation() : null;
+  const category = navigation && typeof wanted === "string" && findCategory(navigation, wanted) ? wanted : null;
   const slug = await uniqueSlug(PLACEHOLDER_SLUG);
   const [page] = await db
     .insert(schema.pages)
@@ -47,10 +56,12 @@ export async function createPage() {
       draftTitle: "",
       content: EMPTY_DOC,
       draftContent: EMPTY_DOC,
+      navSection: category,
       authorId: user.id,
       updatedById: user.id,
     })
     .returning({ id: schema.pages.id });
+  if (navigation && category) await writeNavigation(placePages(navigation, [page.id], category));
   redirect(`/admin/pages/${page.id}`);
 }
 

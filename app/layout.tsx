@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { getSiteSettings } from "@/lib/data/site";
 import { ThemeScript } from "@/components/theme";
+import { colorThemeOf } from "@/lib/color-themes";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,10 +32,13 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // Cached ("settings" tag), so it stays part of the static shell; Tema → Warna updates it.
+  const site = await getSiteSettings();
   return (
     <html
       lang="id"
+      data-color={colorThemeOf(site.colorTheme)}
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} ${sourceSerif.variable} h-full antialiased`}
     >

@@ -6,6 +6,7 @@ import { saveNavigation } from "@/app/admin/_actions/site";
 import { RowControls, move, removeAt, replaceAt } from "@/components/admin/list-controls";
 import { Alert, Button, Panel, inputClass } from "@/components/admin/ui";
 import type { NavigationData, NavItemData, NavSectionData, NavTabData } from "@/lib/site-types";
+import { confirmDialog } from "@/components/admin/dialog";
 
 type PageOption = { id: string; slug: string; title: string; status: "draft" | "scheduled" | "published" };
 
@@ -188,7 +189,15 @@ export function NavigationEditor({ initial, pages }: { initial: NavigationData; 
               length={tabs.length}
               label={tab.title || "tab"}
               onMove={(from, to) => setTabs(move(tabs, from, to))}
-              onRemove={() => confirm(`Hapus tab "${tab.title}" beserta isinya dari navigasi?`) && setTabs(removeAt(tabs, i))}
+              onRemove={async () => {
+                const ok = await confirmDialog({
+                  title: `Hapus tab “${tab.title || "tanpa nama"}”?`,
+                  message: "Tab beserta semua bagiannya dihapus dari navigasi (halamannya tetap ada). Perubahan baru tersimpan setelah Simpan navigasi.",
+                  confirmLabel: "Hapus tab",
+                  tone: "danger",
+                });
+                if (ok) setTabs((current) => removeAt(current, i));
+              }}
             />
           </div>
 

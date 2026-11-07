@@ -41,6 +41,16 @@ export async function replyToComment(input: { id: string; body: string }): Promi
   return (await addStaffReply(parsed.data.id, user.name, parsed.data.body)) ? { ok: true } : notFound;
 }
 
+/** "Setujui semua": approve several comments at once (the pending tab). */
+export async function approveComments(ids: string[]): Promise<Result> {
+  const user = await authorize();
+  if ("error" in user) return { ok: false, error: user.error };
+  const parsed = z.array(idSchema).min(1).max(200).safeParse(ids);
+  if (!parsed.success) return { ok: false, error: "Pilihan tidak valid." };
+  await setCommentStatus(parsed.data, "approved");
+  return { ok: true };
+}
+
 const staffCommentSchema = z.object({
   pageId: idSchema,
   body: z.string().trim().min(1, "Komentar tidak boleh kosong.").max(MAX_COMMENT, "Komentar maksimal 2.000 karakter."),

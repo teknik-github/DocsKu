@@ -7,11 +7,11 @@ import { Alert, Button, Field, Input } from "@/components/admin/ui";
 export function LoginForm({ next }: { next?: string }) {
   const [state, action, pending] = useActionState(loginAction, undefined);
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} className="space-y-5">
       {state?.error && <Alert>{state.error}</Alert>}
       <input type="hidden" name="next" value={next ?? ""} />
       <Field label="Email" error={state?.fieldErrors?.email}>
-        <Input name="email" type="email" autoComplete="email" required autoFocus defaultValue={state?.values?.email} />
+        <Input name="email" type="email" autoComplete="email" placeholder="nama@contoh.com" required autoFocus defaultValue={state?.values?.email} />
       </Field>
       <Field label="Password" error={state?.fieldErrors?.password}>
         <Input name="password" type="password" autoComplete="current-password" required />
@@ -27,7 +27,7 @@ export function SetupForm() {
   const [state, action, pending] = useActionState(setupAction, undefined);
   const errors = state?.fieldErrors ?? {};
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} className="space-y-5">
       {state?.error && <Alert>{state.error}</Alert>}
       <Field label="Nama" error={errors.name}>
         <Input name="name" autoComplete="name" required autoFocus defaultValue={state?.values?.name} />

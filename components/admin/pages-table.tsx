@@ -3,10 +3,13 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ExternalLink, Trash2 } from "lucide-react";
+import { ExternalLink, FolderInput, Trash2 } from "lucide-react";
 import { deletePages } from "@/app/admin/_actions/pages";
+import { movePagesToCategory } from "@/app/admin/_actions/categories";
+import type { CategoryGroup } from "@/lib/categories";
 import { formatDateTime } from "@/components/admin/format";
 import { Button, Panel, StatusBadge } from "@/components/admin/ui";
+import { confirmDialog } from "@/components/admin/dialog";
 
 type Row = {
   id: string;
@@ -17,9 +20,26 @@ type Row = {
   publishedAt: string | null;
   updatedAt: string;
   updatedBy: string | null;
+  /** "Group › Category", shown in the all-pages view. */
+  category?: string | null;
+  /** Not listed yet: joins its category when published. */
+  pendingCategory?: boolean;
 };
 
-export function PagesTable({ pages }: { pages: Row[] }) {
+const NO_CATEGORY = "__none";
+
+export function PagesTable({
+  pages,
+  showCategory = false,
+  moveTargets,
+  empty = "Tidak ada halaman yang cocok.",
+}: {
+  pages: Row[];
+  showCategory?: boolean;
+  /** Categories to move selected pages to (admins only). */
+  moveTargets?: CategoryGroup[];
+  empty?: React.ReactNode;
+}) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, startTransition] = useTransition();
@@ -34,8 +54,27 @@ export function PagesTable({ pages }: { pages: Row[] }) {
       return next;
     });
 
-  function removeSelected() {
-    if (!confirm(`Hapus ${selected.size} halaman? Tindakan ini tidak bisa dibatalkan.`)) return;
+  function moveSelected(target: string) {
+    if (!target) return;
+    setError("");
+    startTransition(async () => {
+      const result = await movePagesToCategory([...selected], target === NO_CATEGORY ? null : target);
+      if (!result.ok) setError(result.error);
+      else {
+        setSelected(new Set());
+        router.refresh();
+      }
+    });
+  }
+
+  async function removeSelected() {
+    const ok = await confirmDialog({
+      title: `Hapus ${selected.size} halaman?`,
+      message: "Halaman beserta semua revisinya dihapus permanen. Tindakan ini tidak bisa dibatalkan.",
+      confirmLabel: "Hapus halaman",
+      tone: "danger",
+    });
+    if (!ok) return;
     startTransition(async () => {
       const result = await deletePages([...selected]);
       if (!result.ok) setError(result.error);
@@ -48,7 +87,7 @@ export function PagesTable({ pages }: { pages: Row[] }) {
 
   if (pages.length === 0) {
     return (
-      <Panel className="px-5 py-14 text-center text-sm text-fg-subtle">Tidak ada halaman yang cocok.</Panel>
+      <Panel className="px-5 py-14 text-center text-sm text-fg-subtle">{empty}</Panel>
     );
   }
 
@@ -57,10 +96,36 @@ export function PagesTable({ pages }: { pages: Row[] }) {
       {selected.size > 0 && (
         <div className="flex items-center justify-between gap-3 border-b border-line bg-fill/50 px-4 py-2">
           <span className="text-sm text-fg-muted">{selected.size} dipilih</span>
-          <Button variant="danger" size="sm" onClick={removeSelected} disabled={pending}>
-            <Trash2 className="size-3.5" />
-            Hapus
-          </Button>
+          <div className="flex items-center gap-2">
+            {moveTargets && (
+              <label className="relative flex items-center">
+                <FolderInput className="pointer-events-none absolute left-2.5 size-3.5 text-fg-muted" />
+                <select
+                  aria-label="Pindahkan ke kategori"
+                  value=""
+                  disabled={pending}
+                  onChange={(e) => moveSelected(e.target.value)}
+                  className="h-8 rounded-lg border border-line bg-surface pr-7 pl-8 text-xs text-fg"
+                >
+                  <option value="">Pindahkan ke…</option>
+                  {moveTargets.map((group) => (
+                    <optgroup key={group.id} label={group.title}>
+                      {group.categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.title}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                  <option value={NO_CATEGORY}>Tanpa kategori</option>
+                </select>
+              </label>
+            )}
+            <Button variant="danger" size="sm" onClick={removeSelected} disabled={pending}>
+              <Trash2 className="size-3.5" />
+              Hapus
+            </Button>
+          </div>
         </div>
       )}
       {error && <p className="border-b border-line px-4 py-2 text-sm text-red-600">{error}</p>}
@@ -77,7 +142,8 @@ export function PagesTable({ pages }: { pages: Row[] }) {
                   className="accent-accent"
                 />
               </th>
-              <th className="w-[55%] py-2.5 pr-4 font-medium">Judul</th>
+              <th className={`${showCategory ? "w-[42%]" : "w-[55%]"} py-2.5 pr-4 font-medium`}>Judul</th>
+              {showCategory && <th className="hidden w-44 py-2.5 pr-4 font-medium lg:table-cell">Kategori</th>}
               <th className="py-2.5 pr-4 font-medium">Status</th>
               <th className="hidden py-2.5 pr-4 font-medium md:table-cell">Diubah</th>
               <th className="w-10 py-2.5 pr-4" />
@@ -103,10 +169,23 @@ export function PagesTable({ pages }: { pages: Row[] }) {
                     <span className="block truncate font-mono text-xs text-fg-subtle">/docs/{page.slug}</span>
                   </Link>
                 </td>
+                {showCategory && (
+                  <td className="hidden max-w-0 py-3 pr-4 lg:table-cell">
+                    <span
+                      title={page.category ?? undefined}
+                      className={`block truncate text-xs ${page.category ? "text-fg-muted" : "text-fg-subtle italic"}`}
+                    >
+                      {page.category?.split(" › ").pop() ?? "Tanpa kategori"}
+                    </span>
+                  </td>
+                )}
                 <td className="py-3 pr-4 whitespace-nowrap">
                   <StatusBadge status={page.status} />
                   {page.hasChanges && (
                     <span className="ml-1.5 text-[11px] text-amber-600 dark:text-amber-400">• ada perubahan</span>
+                  )}
+                  {page.pendingCategory && (
+                    <span className="mt-0.5 block text-xs text-fg-subtle">masuk kategori saat terbit</span>
                   )}
                   {page.status === "scheduled" && (
                     <span className="mt-0.5 block text-xs text-fg-subtle">{formatDateTime(page.publishedAt)}</span>

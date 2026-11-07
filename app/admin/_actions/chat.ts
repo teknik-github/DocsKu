@@ -130,3 +130,19 @@ export async function listChatModels(): Promise<{ models: string[]; defaultModel
     return { models: fallback, defaultModel: config.model };
   }
 }
+
+/**
+ * "Coba lagi" / "Edit": drops a user message and everything after it, so it can
+ * be sent again. Messages already folded into the summary can't be changed.
+ */
+export async function truncateConversation(id: string, fromMessageId: string) {
+  const user = await authorize();
+  if ("error" in user || !isId(id)) return { ok: false as const, error: "Percakapan tidak ditemukan." };
+  const conversation = await getOwnedConversation(id, user.id);
+  if (!conversation) return { ok: false as const, error: "Percakapan tidak ditemukan." };
+  const index = conversation.messages.findIndex((m) => m.id === fromMessageId);
+  if (index < 0 || conversation.messages[index].role !== "user") return { ok: false as const, error: "Pesan tidak ditemukan." };
+  if (index < conversation.compactedCount) return { ok: false as const, error: "Pesan ini sudah diringkas dan tidak bisa diubah lagi." };
+  await db.update(schema.aiConversations).set({ messages: conversation.messages.slice(0, index) }).where(owned(id, user.id));
+  return { ok: true as const };
+}

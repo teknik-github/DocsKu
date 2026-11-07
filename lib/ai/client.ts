@@ -162,13 +162,14 @@ export async function* streamAgentTurn(
   config: AiConfig,
   messages: AgentMessage[],
   tools: ToolSpec[],
-  { maxTokens, signal }: { maxTokens?: number; signal?: AbortSignal } = {},
+  { maxTokens, signal, toolChoice = "auto" }: { maxTokens?: number; signal?: AbortSignal; toolChoice?: "auto" | "none" } = {},
 ): AsyncGenerator<AgentPart> {
   const body = {
     model: config.model,
     messages,
+    // "none" keeps the tool list (and so the cached prompt prefix) but makes the model answer.
     tools,
-    tool_choice: "auto",
+    tool_choice: toolChoice,
     temperature: config.temperature,
     max_tokens: maxTokens ?? config.maxTokens,
   };

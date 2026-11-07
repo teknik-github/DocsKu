@@ -19,20 +19,21 @@ function LinkList({
   return (
     <div className="space-y-2">
       {links.map((link, i) => (
-        <div key={i} className="flex flex-wrap items-start gap-2 rounded-lg border border-line bg-page p-2">
+        // Small screens: title + controls, then the address; wider: title | address | controls.
+        <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-lg border border-line bg-page p-2 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)_auto]">
           <input
             value={link.title}
             onChange={(e) => onChange(replaceAt(links, i, { ...link, title: e.target.value }))}
             placeholder="Judul"
             aria-label="Judul tautan"
-            className={`${inputClass} h-8 w-40 flex-1`}
+            className={`${inputClass} h-8 min-w-0`}
           />
           <input
             value={link.href}
             onChange={(e) => onChange(replaceAt(links, i, { ...link, href: e.target.value }))}
             placeholder="/docs/… atau https://…"
             aria-label="Alamat tautan"
-            className={`${inputClass} h-8 w-48 flex-1 font-mono text-xs`}
+            className={`${inputClass} col-span-2 row-start-2 h-8 min-w-0 font-mono text-xs sm:col-span-1 sm:row-start-auto`}
           />
           {withDescription && (
             <input
@@ -40,16 +41,18 @@ function LinkList({
               onChange={(e) => onChange(replaceAt(links, i, { ...link, description: e.target.value || undefined }))}
               placeholder="Deskripsi (opsional)"
               aria-label="Deskripsi tautan"
-              className={`${inputClass} h-8 w-full`}
+              className={`${inputClass} col-span-2 h-8 min-w-0 sm:order-last sm:col-span-3`}
             />
           )}
-          <RowControls
-            index={i}
-            length={links.length}
-            label={link.title || "tautan"}
-            onMove={(from, to) => onChange(move(links, from, to))}
-            onRemove={() => onChange(removeAt(links, i))}
-          />
+          <div className="col-start-2 row-start-1 sm:col-start-3">
+            <RowControls
+              index={i}
+              length={links.length}
+              label={link.title || "tautan"}
+              onMove={(from, to) => onChange(move(links, from, to))}
+              onRemove={() => onChange(removeAt(links, i))}
+            />
+          </div>
         </div>
       ))}
       <Button size="sm" variant="ghost" onClick={() => onChange([...links, { title: "", href: "" }])}>

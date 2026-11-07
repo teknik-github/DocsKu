@@ -46,6 +46,7 @@ import type { AiActionId } from "@/lib/ai/presets";
 import type { PageSeo } from "@/lib/site-types";
 import { SettingsPanel, type EditorNavigation, type RevisionItem } from "@/components/admin/editor/settings-panel";
 import { StatusBadge, buttonClass } from "@/components/admin/ui";
+import { EditorOutline, InlineEditorOutline } from "@/components/admin/editor/editor-outline";
 
 export type EditorPage = {
   id: string;
@@ -124,7 +125,7 @@ export function PageEditor({
   const [aiJob, setAiJob] = useState<AiJob | null>(null);
   const [describing, setDescribing] = useState(false);
   const isHome = page.kind === "home";
-  const backHref = isHome ? "/admin" : "/admin/pages";
+  const backHref = isHome ? "/admin/home" : "/admin/pages";
 
   // Autosave state lives in refs so the editor's callbacks always see current values.
   const titleRef = useRef(page.title);
@@ -505,7 +506,7 @@ export function PageEditor({
       <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-line bg-page/95 px-4 backdrop-blur">
         <Link href={backHref} onClick={leave} className={buttonClass("ghost", "sm")}>
           <ArrowLeft className="size-4" />
-          <span className="hidden sm:inline">{isHome ? "Dasbor" : "Halaman"}</span>
+          <span className="hidden sm:inline">{isHome ? "Beranda" : "Halaman"}</span>
         </Link>
         <StatusBadge status={status} />
         {hasChanges && (
@@ -643,12 +644,15 @@ export function PageEditor({
               <BlockInsertMenu editor={editor} />
             </>
           )}
+          {/* Wide screens get the outline beside the page; others a collapsible one here. */}
+          {editor && <InlineEditorOutline editor={editor} className={panelOpen || chatOpen ? "min-[1760px]:hidden" : "xl:hidden"} />}
           <div className="relative" onMouseLeave={() => hoverBus.emit({ hover: null })}>
             <EditorContent editor={editor} />
             {editor && <BlockHandle editor={editor} bus={hoverBus} />}
           </div>
         </div>
       </main>
+      {editor && <EditorOutline editor={editor} className={`hidden ${panelOpen || chatOpen ? "min-[1760px]:block" : "xl:block"}`} />}
 
       {chatOpen && (
         <aside className="fixed top-14 right-0 bottom-0 z-30 flex w-full max-w-md flex-col border-l border-line bg-page shadow-xl">

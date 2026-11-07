@@ -7,6 +7,7 @@ import { formatDateTime } from "@/components/admin/format";
 import { ImageDialog } from "@/components/admin/editor/image-dialog";
 import type { PageSeo } from "@/lib/site-types";
 import { Button, Select, StatusBadge, inputClass } from "@/components/admin/ui";
+import { confirmDialog } from "@/components/admin/dialog";
 
 export type RevisionItem = {
   id: string;
@@ -111,7 +112,7 @@ export function SettingsPanel({
       <div className="flex-1 space-y-8 overflow-y-auto p-5">
         {isHome ? (
           <section className="text-sm text-fg-muted">
-            Ini adalah beranda situs (<code>/</code>). Selama belum diterbitkan, situs memakai beranda bawaan.
+            Ini beranda blok versi lama. Beranda sekarang disusun di dasbor → Beranda; halaman ini hanya tampil di <code>/</code> bila sudah terbit dan susunan beranda belum pernah diterbitkan.
           </section>
         ) : (
         <section>
@@ -228,7 +229,14 @@ export function SettingsPanel({
                   </span>
                   <button
                     type="button"
-                    onClick={() => confirm("Ganti isi draf dengan revisi ini?") && onRestore(revision.id)}
+                    onClick={async () => {
+                      const ok = await confirmDialog({
+                        title: "Pulihkan revisi ini?",
+                        message: "Isi draf diganti dengan revisi ini. Versi sekarang tetap tersimpan di riwayat revisi.",
+                        confirmLabel: "Pulihkan",
+                      });
+                      if (ok) onRestore(revision.id);
+                    }}
                     className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-fg-muted hover:bg-fill hover:text-fg"
                   >
                     <RotateCcw className="size-3" />
@@ -245,8 +253,14 @@ export function SettingsPanel({
           <Button
             variant="danger"
             size="sm"
-            onClick={() => {
-              if (!confirm("Hapus halaman ini beserta semua revisinya? Tindakan ini tidak bisa dibatalkan.")) return;
+            onClick={async () => {
+              const ok = await confirmDialog({
+                title: "Hapus halaman ini?",
+                message: "Halaman beserta semua revisinya dihapus permanen. Tindakan ini tidak bisa dibatalkan.",
+                confirmLabel: "Hapus halaman",
+                tone: "danger",
+              });
+              if (!ok) return;
               startTransition(async () => {
                 const result = await deletePage(pageId);
                 if (result && !result.ok) setError(result.error);

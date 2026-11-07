@@ -8,6 +8,7 @@ import { deleteFeedback, setFeedbackResolved } from "@/app/admin/_actions/stats"
 import type { FeedbackItem } from "@/lib/data/stats";
 import { formatDateTime } from "@/components/admin/format";
 import { Alert, buttonClass } from "@/components/admin/ui";
+import { confirmDialog } from "@/components/admin/dialog";
 
 /** Reader feedback list with "done" and delete actions. */
 export function StatsFeedback({ items }: { items: FeedbackItem[] }) {
@@ -73,8 +74,9 @@ export function StatsFeedback({ items }: { items: FeedbackItem[] }) {
                 type="button"
                 disabled={pending}
                 aria-label="Hapus masukan"
-                onClick={() => {
-                  if (confirm("Hapus masukan ini?")) run(() => deleteFeedback(item.id));
+                onClick={async () => {
+                  const ok = await confirmDialog({ title: "Hapus masukan ini?", message: "Masukan pembaca dihapus permanen.", confirmLabel: "Hapus", tone: "danger" });
+                  if (ok) run(() => deleteFeedback(item.id));
                 }}
                 className={`${buttonClass("ghost", "sm")} hover:text-red-600`}
               >
