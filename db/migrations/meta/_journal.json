@@ -106,6 +106,13 @@
       "when": 1794132894085,
       "tag": "0014_author_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794136682504,
+      "tag": "0015_page_templates",
+      "breakpoints": true
     }
   ]
 }

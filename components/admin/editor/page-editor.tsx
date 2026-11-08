@@ -96,12 +96,15 @@ export function PageEditor({
   revisions,
   aiEnabled = false,
   navigation,
+  isAdmin = false,
 }: {
   page: EditorPage;
   revisions: RevisionItem[];
   /** AI Write is configured; shows "/ai", the AI button on selections, and description help. */
   aiEnabled?: boolean;
   navigation: EditorNavigation;
+  /** Admins also get a link to the page's activity log. */
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(page.title);
@@ -375,8 +378,8 @@ export function PageEditor({
   }
 
   async function restore(revisionId: string) {
-    window.clearTimeout(timer.current);
-    if (inFlight.current) await inFlight.current;
+    // Save pending edits first: the server keeps them as a "before-restore" revision.
+    await save();
     const result = await restoreRevision(page.id, revisionId);
     if (!result.ok) {
       setError(result.error);
@@ -690,6 +693,8 @@ export function PageEditor({
           title={title}
           description={description}
           onRestore={restore}
+          onFlush={() => save()}
+          isAdmin={isAdmin}
           onClose={() => setPanelOpen(false)}
         />
       )}

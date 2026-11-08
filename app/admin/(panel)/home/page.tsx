@@ -8,37 +8,49 @@ import { allPages } from "@/lib/navigation";
 import { parseHomeSections } from "@/lib/home-schema";
 import { defaultSections } from "@/lib/home-sections";
 import { HomeBuilder } from "@/components/admin/home-builder";
+import { readLanguages } from "@/lib/translations";
+import { isAiReady } from "@/lib/ai/config";
 
 export const metadata = { title: "Beranda" };
 
-export default function HomePage() {
+export default function HomePage({ searchParams }: PageProps<"/admin/home">) {
   return (
     <Suspense fallback={<div className="h-full animate-pulse bg-fill/40" />}>
-      <Builder />
+      <Builder searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function Builder() {
+async function Builder({ searchParams }: Pick<PageProps<"/admin/home">, "searchParams">) {
   await requireUser();
-  const [draft, live, tabs, [legacy]] = await Promise.all([
-    readSettingForAdmin<unknown>("home_draft"),
-    readSettingForAdmin<unknown>("home"),
+  const [{ bahasa }, languages] = await Promise.all([searchParams, readLanguages()]);
+  // ?bahasa=<code>: the home of an extra language (/<code>), when that language is enabled.
+  const locale = typeof bahasa === "string" && languages.languages.some((l) => l.code === bahasa) ? bahasa : undefined;
+  const [draft, live, tabs, [legacy], aiReady] = await Promise.all([
+    readSettingForAdmin<unknown>(locale ? `home_draft:${locale}` : "home_draft"),
+    readSettingForAdmin<unknown>(locale ? `home:${locale}` : "home"),
     getNavigation(),
     db
       .select({ id: schema.pages.id })
       .from(schema.pages)
       .where(and(eq(schema.pages.kind, "home"), eq(schema.pages.status, "published"))),
+    isAiReady(),
   ]);
   const draftSections = parseHomeSections(draft);
   const published = parseHomeSections(live);
   return (
     <HomeBuilder
-      initial={draftSections ?? published ?? defaultSections()}
+      // A fresh builder per language: its own sections, draft and preview.
+      key={locale ?? ""}
+      initial={draftSections ?? published ?? (locale ? [] : defaultSections())}
       hasDraft={draftSections !== null}
       published={published}
-      legacyHome={published === null && Boolean(legacy)}
+      legacyHome={!locale && published === null && Boolean(legacy)}
       pages={allPages(tabs).map((page) => ({ href: page.href, title: page.title }))}
+      locale={locale}
+      languages={languages.languages.length ? [{ code: languages.defaultLocale, label: languages.defaultLabel }, ...languages.languages] : []}
+      started={!locale || draftSections !== null || published !== null}
+      aiReady={aiReady}
     />
   );
 }

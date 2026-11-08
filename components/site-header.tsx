@@ -18,7 +18,7 @@ const isExternal = (href: string) => /^https?:\/\//.test(href);
 
 export function SiteHeader() {
   const pathname = usePathname();
-  const { site, tabs, locale, i18n } = useSite();
+  const { site, tabs, locale, i18n, homeHref } = useSite();
   const activeTab = findTab(tabs, pathname);
   const layout = site.layout ?? "docs";
   // The hub of the language being read: /docs, or /docs/<code>.
@@ -27,7 +27,7 @@ export function SiteHeader() {
 
   return (
     <header className="fixed inset-x-0 top-0 z-40 flex h-(--header-h) items-center gap-4 border-b border-line bg-page/90 px-4 backdrop-blur-md lg:px-5">
-      <Logo name={site.name} />
+      <Logo name={site.name} href={homeHref} />
 
       <nav aria-label={t(locale, "docSections")} className="ml-4 hidden h-full items-center gap-1 lg:flex">
         {tabs.map((tab) => {

@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { FileQuestion, Files, ListTree, Lock, Plus, Search } from "lucide-react";
-import { createPage } from "@/app/admin/_actions/pages";
+import { FileQuestion, Files, LayoutTemplate, ListTree, Lock, Plus, Search, Upload } from "lucide-react";
+import { NewPageButton } from "@/components/admin/new-page-button";
 import { requireUser } from "@/lib/auth/dal";
 import { listPages } from "@/lib/data/admin";
 import { readNavigation } from "@/lib/automation";
@@ -31,7 +31,16 @@ const NONE = "tanpa";
 export default function PagesPage({ searchParams }: PageProps<"/admin/pages">) {
   return (
     <>
-      <PageHeader title="Halaman" description="Kelompokkan halaman ke dalam kategori, lalu tulis halaman baru langsung di kategorinya." />
+      <PageHeader
+        title="Halaman"
+        description="Kelompokkan halaman ke dalam kategori, lalu tulis halaman baru langsung di kategorinya."
+        actions={
+          <Link href="/admin/pages/impor" className={buttonClass("secondary")}>
+            <Upload className="size-4" />
+            Impor
+          </Link>
+        }
+      />
       <Suspense fallback={<div className="h-96 animate-pulse rounded-xl bg-fill" />}>
         <PagesView searchParams={searchParams} />
       </Suspense>
@@ -173,6 +182,13 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
               <span className="text-xs text-fg-subtle tabular-nums">{allPages.filter((page) => page.visibility === "internal").length}</span>
             </a>
           )}
+          <Link
+            href="/admin/templates"
+            className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-fg-muted transition-colors hover:bg-fill hover:text-fg"
+          >
+            <LayoutTemplate className="size-4 shrink-0 text-fg-subtle" />
+            <span className="min-w-0 flex-1 truncate">Templat halaman</span>
+          </Link>
           {(uncategorised > 0 || groups.length === 0) && (
             <div className="space-y-0.5 border-t border-line pt-3">
               {sideLink(NONE, "Tanpa kategori", uncategorised, <FileQuestion className="size-4 shrink-0 text-fg-subtle" />)}
@@ -211,13 +227,10 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {current && isAdmin && <CategoryActions key={current.id} id={current.id} title={current.title} />}
-            <form action={createPage}>
-              {current && <input type="hidden" name="category" value={current.id} />}
-              <button type="submit" className={buttonClass("accent")}>
-                <Plus className="size-4" />
-                {current ? "Halaman baru di sini" : "Halaman baru"}
-              </button>
-            </form>
+            <NewPageButton category={current?.id} className={buttonClass("accent")}>
+              <Plus className="size-4" />
+              {current ? "Halaman baru di sini" : "Halaman baru"}
+            </NewPageButton>
           </div>
         </div>
 

@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "db:up": "docker compose up -d --wait",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -15,6 +17,8 @@
     "db:studio": "drizzle-kit studio",
     "prod:deploy": "sh deploy/deploy.sh",
     "release": "sh deploy/release.sh",
+    "backup": "sh deploy/backup.sh",
+    "restore": "sh deploy/restore.sh",
     "prod:logs": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production logs -f app",
     "prod:stop": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production stop app"
   },
@@ -31,7 +35,9 @@
     "@tiptap/react": "^3.32.0",
     "@tiptap/starter-kit": "^3.32.0",
     "@tiptap/suggestion": "^3.32.0",
+    "diff": "^9.0.0",
     "drizzle-orm": "^0.45.4",
+    "fflate": "^0.8.3",
     "github-slugger": "^2.0.0",
     "lucide-react": "^1.56.0",
     "marked": "^18.1.1",
@@ -49,6 +55,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@tailwindcss/turbopack": "^4",
     "@types/node": "^20",
     "@types/qrcode": "^1.5.6",

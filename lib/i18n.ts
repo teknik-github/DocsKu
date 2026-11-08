@@ -43,9 +43,9 @@ export const LANGUAGE_SUGGESTIONS: Language[] = [
 
 export const extraCodes = (settings: LanguageSettings) => settings.languages.map((language) => language.code);
 
-/** The extra language a /docs path belongs to (`/docs/en`, `/docs/en/…`), or the default. */
+/** The extra language a path belongs to (its home `/en`, `/docs/en`, `/docs/en/…`), or the default. */
 export function localeFromPath(pathname: string, settings: Pick<LanguageSettings, "defaultLocale" | "languages">): string {
-  const match = /^\/docs\/([^/]+)(?:\/|$)/.exec(pathname);
+  const match = /^\/(?:docs\/)?([^/]+)(?:\/|$)/.exec(pathname);
   const code = match?.[1];
   return code && settings.languages.some((language) => language.code === code) ? code : settings.defaultLocale;
 }
@@ -56,6 +56,15 @@ export const localeFromSlug = (slug: string, settings: Pick<LanguageSettings, "d
 
 /** The slug of a translation of `slug` into `code`. */
 export const translationSlug = (code: string, slug: string) => `${code}/${slug}`;
+
+/** The home of a language: /, or /<code>. */
+export const homeHref = (locale: string, defaultLocale: string) => (locale === defaultLocale ? "/" : `/${locale}`);
+
+/**
+ * Codes that can't be a language: first path segments the site already uses
+ * (/api…). Language codes are 2–3 letters, so only short route names matter.
+ */
+export const RESERVED_CODES = ["api"];
 
 /** The docs hub of a language: /docs, or /docs/<code>. */
 export const hubHref = (locale: string, defaultLocale: string) => (locale === defaultLocale ? "/docs" : `/docs/${locale}`);
@@ -200,6 +209,11 @@ const id = {
   author: "Penulis",
   articlesBy: "Tulisan {name}",
   nArticles: "{n} artikel",
+  popularLabel: "Populer:",
+  homeEmpty: "Beranda masih kosong.",
+  noArticlesToShow: "Belum ada artikel untuk ditampilkan.",
+  openTab: "Buka {name}",
+  helpCenterOf: "Pusat bantuan {name}",
 } as const;
 
 export type I18nKey = keyof typeof id;
@@ -339,6 +353,11 @@ const en: Record<I18nKey, string> = {
   author: "Author",
   articlesBy: "Articles by {name}",
   nArticles: "{n} articles",
+  popularLabel: "Popular:",
+  homeEmpty: "This home page is still empty.",
+  noArticlesToShow: "No articles to show yet.",
+  openTab: "Open {name}",
+  helpCenterOf: "{name} help center",
 };
 
 const DICTIONARIES: Record<string, Record<I18nKey, string>> = { id, en };

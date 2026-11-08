@@ -82,6 +82,7 @@ export async function listRevisions(pageId: string) {
       reason: schema.pageRevisions.reason,
       createdAt: schema.pageRevisions.createdAt,
       author: schema.users.name,
+      avatar: schema.users.avatar,
     })
     .from(schema.pageRevisions)
     .leftJoin(schema.users, eq(schema.pageRevisions.createdById, schema.users.id))
@@ -157,7 +158,7 @@ export async function listUsers() {
 }
 
 /** Raw stored settings (uncached), for the settings and navigation editors. */
-export async function readSettingForAdmin<T>(key: "site" | "navigation" | "home" | "home_draft"): Promise<T | undefined> {
+export async function readSettingForAdmin<T>(key: "site" | "navigation" | "home" | "home_draft" | `home:${string}` | `home_draft:${string}`): Promise<T | undefined> {
   const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, key));
   return row?.value as T | undefined;
 }

@@ -35,7 +35,10 @@ const COMMENT_STATUS: Record<string, string> = { approved: "disetujui", pending:
 const COMMENT_VERB: Record<string, string> = { approved: "menyetujui komentar", pending: "menyembunyikan komentar", spam: "menandai spam komentar" };
 
 const TEXT: Record<string, (m: Meta) => ActivityText> = {
-  "page.create": (m) => ({ verb: m.via === "ai" ? "membuat halaman dari AI Chat" : "membuat halaman" }),
+  "page.create": (m) => ({
+    verb: m.via === "ai" ? "membuat halaman dari AI Chat" : "membuat halaman",
+    after: m.template ? ` dari templat “${str(m.template)}”` : "",
+  }),
   "page.edit": () => ({ verb: "mengubah draf" }),
   "page.publish": (m) => (m.scheduled ? { verb: "menerbitkan sesuai jadwal", tone: "good" } : { verb: "menerbitkan", tone: "good" }),
   "page.schedule": (m) => ({ verb: "menjadwalkan", after: m.publishAt ? ` untuk ${fmt(m.publishAt)}` : "" }),
@@ -50,6 +53,9 @@ const TEXT: Record<string, (m: Meta) => ActivityText> = {
   "page.review": () => ({ verb: "menandai sudah ditinjau", tone: "good" }),
   "page.owner": () => ({ verb: "mengubah penanggung jawab" }),
   "page.author": (m) => ({ verb: "mengganti penulis", after: m.author ? ` menjadi ${str(m.author)}` : "" }),
+  "template.create": () => ({ verb: "menyimpan templat" }),
+  "template.update": () => ({ verb: "mengubah templat" }),
+  "template.delete": () => ({ verb: "menghapus templat", tone: "danger" }),
 
   "category.create": () => ({ verb: "membuat kategori" }),
   "category.rename": (m) => ({ verb: "mengganti nama kategori", after: m.from ? ` (sebelumnya ${str(m.from)})` : "" }),
@@ -58,8 +64,9 @@ const TEXT: Record<string, (m: Meta) => ActivityText> = {
   "category.image": () => ({ verb: "mengganti gambar kategori" }),
   "category.image_remove": () => ({ verb: "menghapus gambar kategori" }),
   "navigation.save": () => ({ verb: "menyimpan navigasi", noTarget: true }),
-  "home.publish": () => ({ verb: "menerbitkan beranda", noTarget: true, tone: "good" }),
-  "home.discard": () => ({ verb: "membuang draf beranda", noTarget: true }),
+  "home.publish": (m) => ({ verb: m.locale ? `menerbitkan beranda bahasa ${str(m.locale).toUpperCase()}` : "menerbitkan beranda", noTarget: true, tone: "good" }),
+  "home.discard": (m) => ({ verb: m.locale ? `membuang draf beranda bahasa ${str(m.locale).toUpperCase()}` : "membuang draf beranda", noTarget: true }),
+  "home.translate": (m) => ({ verb: m.ai ? "menerjemahkan beranda dengan AI ke" : "menyalin beranda ke", after: "" }),
 
   "settings.save": () => ({ verb: "mengubah pengaturan" }),
   "theme.layout": () => ({ verb: "mengganti tata letak dokumentasi menjadi" }),
@@ -125,6 +132,8 @@ export function activityHref(type: string | null, id: string | null): string | n
       return "/admin/media";
     case "redirect":
       return "/admin/redirects";
+    case "template":
+      return "/admin/templates";
     case "settings":
       return id ? `/admin/settings#${id}` : "/admin/settings";
     case "comment":

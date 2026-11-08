@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { Suspense } from "react";
 import Link from "next/link";
 import {
@@ -22,7 +23,7 @@ import {
   Link2Off,
 } from "lucide-react";
 import { countBrokenLinks } from "@/lib/review";
-import { createPage } from "@/app/admin/_actions/pages";
+import { NewPageButton } from "@/components/admin/new-page-button";
 import { requireUser } from "@/lib/auth/dal";
 import { getNavCounts, getPageStats, listPages, listScheduledPages, readSettingForAdmin } from "@/lib/data/admin";
 import { getAskStats, getSearchStats, getStatsOverview, getTopPages } from "@/lib/data/stats";
@@ -100,6 +101,7 @@ async function Dashboard() {
     readSettingForAdmin<{ sections?: unknown[] }>("home"),
     db.select({ total: count() }).from(schema.users),
   ]);
+  await connection(); // "today" depends on the request time, not on the prerender.
   const now = new Date();
   const today = new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: TIME_ZONE }).format(now);
 
@@ -143,12 +145,10 @@ async function Dashboard() {
             <Sparkles className="size-4" />
             AI Chat
           </Link>
-          <form action={createPage}>
-            <button type="submit" className={buttonClass("accent")}>
-              <Plus className="size-4" />
-              Halaman baru
-            </button>
-          </form>
+          <NewPageButton className={buttonClass("accent")}>
+            <Plus className="size-4" />
+            Halaman baru
+          </NewPageButton>
         </div>
       </div>
 

@@ -386,3 +386,20 @@ export const linkChecks = pgTable("link_checks", {
   error: text("error"),
   checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Reusable starting points for new pages ("Halaman baru" → pick a template). Built-in ones live in code (lib/templates.ts). */
+export const pageTemplates = pgTable("page_templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  /** lucide icon name, optional. */
+  icon: text("icon"),
+  /** Prefilled title and description for the new page (may be empty). */
+  pageTitle: text("page_title").notNull().default(""),
+  pageDescription: text("page_description").notNull().default(""),
+  content: jsonb("content").$type<JSONContent>().notNull(),
+  createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  ...timestamps,
+});
+
+export type PageTemplate = typeof pageTemplates.$inferSelect;

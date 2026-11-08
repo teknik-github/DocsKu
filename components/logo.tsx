@@ -1,8 +1,9 @@
 import Link from "next/link";
 
-export function Logo({ name }: { name: string }) {
+/** `href`: the home of the language being read ("/" or "/<code>"). */
+export function Logo({ name, href = "/" }: { name: string; href?: string }) {
   return (
-    <Link href="/" className="flex shrink-0 items-center gap-2">
+    <Link href={href} className="flex shrink-0 items-center gap-2">
       <span className="flex size-7 items-center justify-center rounded-lg bg-accent font-serif text-base text-white">
         {name.charAt(0).toUpperCase()}
       </span>

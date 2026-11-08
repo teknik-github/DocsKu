@@ -12,6 +12,10 @@
 
 # testing
 /coverage
+/.next-e2e/
+/test-results/
+/playwright-report/
+/tests/e2e/.state/
 
 # next.js
 /.next/
@@ -44,3 +48,6 @@ next-env.d.ts
 
 # uploaded media
 /storage
+
+# archives from pnpm backup
+/backups

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { ArrowLeft, Copy, ExternalLink, Eye, EyeOff, GripVertical, Monitor, Plus, Smartphone, Trash2, Undo2, X } from "lucide-react";
-import { discardHomeDraft, publishHome, saveHomeDraft } from "@/app/admin/_actions/home";
+import Link from "next/link";
+import { ArrowLeft, Copy, ExternalLink, Eye, EyeOff, GripVertical, Languages, Monitor, Plus, Smartphone, Sparkles, Trash2, Undo2, X } from "lucide-react";
+import { discardHomeDraft, publishHome, saveHomeDraft, startHomeTranslation } from "@/app/admin/_actions/home";
 import { Alert, Button, buttonClass } from "@/components/admin/ui";
 import { Icon } from "@/components/icon";
 import { SectionForm, type LinkOption } from "@/components/admin/home-section-form";
@@ -37,6 +38,10 @@ export function HomeBuilder({
   published,
   legacyHome,
   pages,
+  locale,
+  languages = [],
+  started: initialStarted = true,
+  aiReady = false,
 }: {
   initial: HomeSection[];
   hasDraft: boolean;
@@ -45,7 +50,20 @@ export function HomeBuilder({
   /** An old block-edited home is live until this builder is published. */
   legacyHome: boolean;
   pages: LinkOption[];
+  /** The extra language being edited (its home is /<code>); undefined for the default language. */
+  locale?: string;
+  /** Every language, default first, for the switcher; empty when the site has one language. */
+  languages?: { code: string; label: string }[];
+  /** False while an extra language has neither a draft nor a published home yet. */
+  started?: boolean;
+  aiReady?: boolean;
 }) {
+  const [started, setStarted] = useState(initialStarted);
+  const [starting, setStarting] = useState<"copy" | "ai" | null>(null);
+  const languageLabel = languages.find((language) => language.code === locale)?.label;
+  const defaultLabel = languages[0]?.label ?? "bahasa utama";
+  const previewSrc = locale ? `/preview/beranda?bahasa=${locale}` : "/preview/beranda";
+  const liveHref = locale ? `/${locale}` : "/";
   const [sections, setSections] = useState(initial);
   const [selected, setSelected] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -89,14 +107,14 @@ export function HomeBuilder({
     if (!changed.current) return;
     setSave({ state: "saving" });
     const timer = setTimeout(async () => {
-      const result = await saveHomeDraft(sections);
+      const result = await saveHomeDraft(sections, locale);
       if (!result.ok) return setSave({ state: "error", error: result.error });
       setHasDraft(true);
       setSave({ state: "saved", at: result.savedAt });
       frame.current?.contentWindow?.location.reload();
     }, 700);
     return () => clearTimeout(timer);
-  }, [sections]);
+  }, [sections, locale]);
 
   function update(next: HomeSection[]) {
     changed.current = true;
@@ -143,10 +161,13 @@ export function HomeBuilder({
   function publish() {
     setNotice(null);
     startPublish(async () => {
-      const result = await publishHome(sections);
+      const result = await publishHome(sections, locale);
       if (!result.ok) return setNotice({ tone: "error", text: result.error });
       setHasDraft(false);
-      setNotice({ tone: "success", text: "Beranda diterbitkan. Pengunjung sekarang melihat susunan ini." });
+      setNotice({
+        tone: "success",
+        text: locale ? `Beranda ${languageLabel} diterbitkan di ${liveHref}.` : "Beranda diterbitkan. Pengunjung sekarang melihat susunan ini.",
+      });
     });
   }
 
@@ -159,10 +180,11 @@ export function HomeBuilder({
     });
     if (!ok) return;
     startPublish(async () => {
-      const result = await discardHomeDraft();
+      const result = await discardHomeDraft(locale);
       if (!result.ok) return setNotice({ tone: "error", text: result.error });
       changed.current = false;
-      setSections(published ?? defaultSections());
+      setSections(published ?? (locale ? [] : defaultSections()));
+      if (locale && !published) setStarted(false);
       setSelected(null);
       setHasDraft(false);
       setSave({ state: "idle" });
@@ -170,8 +192,25 @@ export function HomeBuilder({
     });
   }
 
+  /** An extra language's first draft: the default home with links moved to it, optionally translated by AI. */
+  async function start(ai: boolean) {
+    if (!locale) return;
+    setNotice(null);
+    setStarting(ai ? "ai" : "copy");
+    const result = await startHomeTranslation(locale, ai);
+    setStarting(null);
+    if (!result.ok) return setNotice({ tone: "error", text: result.error });
+    changed.current = false;
+    setSections(result.sections);
+    setHasDraft(true);
+    setStarted(true);
+    frame.current?.contentWindow?.location.reload();
+  }
+
   const status =
-    save.state === "saving"
+    !started
+      ? `Beranda ${languageLabel} belum dibuat`
+      : save.state === "saving"
       ? "Menyimpan draf…"
       : save.state === "error"
         ? "Draf belum tersimpan"
@@ -184,9 +223,28 @@ export function HomeBuilder({
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 border-b border-line bg-surface px-4 py-2.5">
         <div className="min-w-0 flex-1">
-          <h1 className="text-sm font-semibold text-fg">Beranda</h1>
+          <h1 className="text-sm font-semibold text-fg">{locale ? `Beranda · ${languageLabel}` : "Beranda"}</h1>
           <p className={`truncate text-xs ${save.state === "error" ? "text-red-600 dark:text-red-400" : "text-fg-subtle"}`}>{status}</p>
         </div>
+        {languages.length > 0 && (
+          <nav aria-label="Bahasa beranda" className="flex items-center gap-1 rounded-lg bg-fill p-1">
+            <Languages className="mx-1 size-3.5 text-fg-subtle" aria-hidden />
+            {languages.map((language, i) => {
+              const active = i === 0 ? !locale : language.code === locale;
+              return (
+                <Link
+                  key={language.code}
+                  href={i === 0 ? "/admin/home" : `/admin/home?bahasa=${language.code}`}
+                  aria-current={active ? "page" : undefined}
+                  title={language.label}
+                  className={`rounded-md px-2 py-1 text-xs font-medium uppercase ${active ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"}`}
+                >
+                  {language.code}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
         <div className="hidden gap-1 rounded-lg bg-fill p-1 lg:flex" aria-label="Ukuran pratinjau">
           {(
             [
@@ -206,7 +264,7 @@ export function HomeBuilder({
             </button>
           ))}
         </div>
-        <a href="/preview/beranda" target="_blank" rel="noreferrer" className={buttonClass("ghost", "sm")}>
+        <a href={previewSrc} target="_blank" rel="noreferrer" className={buttonClass("ghost", "sm")}>
           <ExternalLink className="size-3.5" />
           Pratinjau
         </a>
@@ -216,7 +274,12 @@ export function HomeBuilder({
             Buang perubahan
           </Button>
         )}
-        <Button size="sm" variant="accent" onClick={publish} disabled={publishing || save.state === "saving" || (!hasDraft && !legacyHome && published !== null)}>
+        <Button
+          size="sm"
+          variant="accent"
+          onClick={publish}
+          disabled={!started || publishing || save.state === "saving" || (!hasDraft && !legacyHome && published !== null)}
+        >
           {publishing ? "Menerbitkan…" : "Terbitkan"}
         </Button>
       </div>
@@ -232,7 +295,32 @@ export function HomeBuilder({
             </div>
           )}
 
-          {current ? (
+          {!started ? (
+            <div className="space-y-4 p-4">
+              <div>
+                <h2 className="text-sm font-semibold text-fg">Beranda {languageLabel}</h2>
+                <p className="mt-1 text-sm text-fg-muted">
+                  Pembaca {languageLabel} membuka <span className="font-mono text-xs">{liveHref}</span>. Selama beranda ini belum diterbitkan, alamat itu
+                  membuka dokumentasi {languageLabel} (<span className="font-mono text-xs">/docs/{locale}</span>).
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Button variant="secondary" onClick={() => start(false)} disabled={starting !== null}>
+                  <Copy className="size-4" />
+                  {starting === "copy" ? "Menyalin…" : `Salin dari ${defaultLabel}`}
+                </Button>
+                {aiReady && (
+                  <Button variant="accent" onClick={() => start(true)} disabled={starting !== null}>
+                    <Sparkles className="size-4" />
+                    {starting === "ai" ? "Menerjemahkan…" : "Terjemahkan dengan AI"}
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-fg-subtle">
+                Tautan ke dokumentasi otomatis diarahkan ke versi {languageLabel}. Hasilnya berupa draf; periksa dulu, lalu Terbitkan.
+              </p>
+            </div>
+          ) : current ? (
             <div className="p-4">
               <button type="button" onClick={() => setSelected(null)} className="mb-4 flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg">
                 <ArrowLeft className="size-3.5" />
@@ -318,7 +406,7 @@ export function HomeBuilder({
             </div>
           )}
 
-          {!adding && (
+          {!adding && started && (
             <div className="sticky bottom-0 mt-auto border-t border-line bg-surface p-4">
               <Button variant="secondary" className="w-full" onClick={() => (setAdding(true), setSelected(null))} disabled={sections.length >= 30}>
                 <Plus className="size-4" />
@@ -332,7 +420,7 @@ export function HomeBuilder({
         <div className="hidden min-w-0 flex-1 justify-center overflow-hidden bg-fill p-4 lg:flex">
           <iframe
             ref={frame}
-            src="/preview/beranda"
+            src={previewSrc}
             title="Pratinjau beranda"
             className={`h-full rounded-xl border border-line bg-page shadow-sm transition-[width] ${device === "mobile" ? "w-[390px]" : "w-full"}`}
           />

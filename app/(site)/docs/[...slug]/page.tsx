@@ -20,9 +20,18 @@ import { DocArticle, DocSkeleton } from "@/components/doc-article";
 import { ReaderFooter } from "@/components/reader-footer";
 import { pageMetadata } from "@/lib/seo";
 import { getInternalPage } from "@/lib/data/internal";
+import { internalSlugExists } from "@/lib/data/existence";
+import { getCurrentUser } from "@/lib/auth/dal";
 import { InternalBanner } from "@/components/internal-banner";
 import { getAuthor } from "@/lib/data/authors";
 import { AuthorBox } from "@/components/author";
+
+/**
+ * The page decides "not found" from `params` before anything streams (a real
+ * HTTP 404 instead of a 200 with not-found content), so a navigation to a slug
+ * that wasn't prerendered waits for that check instead of showing a fallback first.
+ */
+export const instant = false;
 
 export async function generateStaticParams() {
   const [slugs, languages] = await Promise.all([getPublishedSlugs(), getLanguageSettings()]);
@@ -63,7 +72,17 @@ export async function generateMetadata({
   return metadata;
 }
 
-export default function DocPage({ params }: PageProps<"/docs/[...slug]">) {
+export default async function DocPage({ params }: PageProps<"/docs/[...slug]">) {
+  // Decide "not found" before anything streams, so it is a real HTTP 404. An internal
+  // article is a 404 for visitors too, the same response as a slug that doesn't exist.
+  const { slug } = await params;
+  const path = slug.join("/");
+  const [hub, page] = await Promise.all([hubLanguage(slug), getPublishedPage(path)]);
+  if (!hub && !page) {
+    // Both lookups for every miss, so an internal slug and an unknown one do the same work.
+    const [internal, user] = await Promise.all([internalSlugExists(path), getCurrentUser()]);
+    if (!internal || !user) notFound();
+  }
   return (
     <Suspense fallback={<DocSkeleton />}>
       <DocContent params={params} />

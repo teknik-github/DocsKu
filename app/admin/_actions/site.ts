@@ -13,6 +13,7 @@ import { isCoverColor } from "@/lib/cover-palette";
 import { COLOR_THEME_IDS } from "@/lib/color-themes";
 import { isCategoryImage } from "@/lib/categories";
 import { DOCS_LAYOUT_IDS } from "@/lib/docs-layouts";
+import { LANGUAGE_CODE } from "@/lib/i18n";
 import type { AutomationSettings, DocsLayout, NavigationData, SiteSettings } from "@/lib/site-types";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -34,6 +35,17 @@ const siteSchema = z.object({
   headerCta: z.object({ title: label, href }).nullable(),
   resources: z.array(link).max(20),
   footer: z.array(z.object({ title: label, links: z.array(link).max(20) })).max(6),
+  /** Per extra language: description, header button and footer (Pengaturan → Umum, language switcher). */
+  localized: z
+    .record(
+      z.string().regex(LANGUAGE_CODE),
+      z.object({
+        description: z.string().trim().max(300).optional(),
+        headerCta: z.object({ title: label, href }).nullable().optional(),
+        footer: z.array(z.object({ title: label, links: z.array(link).max(20) })).max(6).optional(),
+      }),
+    )
+    .optional(),
 });
 
 async function readSite(): Promise<Partial<SiteSettings>> {

@@ -18,6 +18,7 @@ import { countOverdueReviews, getReviewSettings } from "@/lib/review";
 import { ReviewSettingsForm } from "@/components/admin/review-settings-form";
 import { PageHeader, Panel } from "@/components/admin/ui";
 import { WidgetSettingsForm } from "@/components/admin/widget-settings-form";
+import { ExportPanel } from "@/components/admin/export-panel";
 import { LanguageSettingsForm } from "@/components/admin/language-settings-form";
 import { readLanguages } from "@/lib/translations";
 import { COLOR_THEMES, colorThemeOf } from "@/lib/color-themes";
@@ -77,6 +78,12 @@ async function Settings() {
   ]);
   const site = { ...DEFAULT_SITE, ...stored };
   const [widget, askAiAvailable] = await Promise.all([getWidgetSettings(), getAskAiAvailable()]);
+  const [exportCounts] = await db.execute<{ pages: number; drafts: number; internal: number; translations: number }>(sql`
+    select count(*) filter (where status = 'published' and visibility = 'public' and translation_of is null)::int as pages,
+      count(*) filter (where status <> 'published')::int as drafts,
+      count(*) filter (where visibility = 'internal')::int as internal,
+      count(*) filter (where translation_of is not null)::int as translations
+    from pages where kind = 'doc'`);
   const themeAccent = (COLOR_THEMES.find((t) => t.id === colorThemeOf(site.colorTheme)) ?? COLOR_THEMES[0]).light.accent;
   const [review, overdue] = await Promise.all([getReviewSettings(), countOverdueReviews()]);
   const [languages, translationCounts] = await Promise.all([
@@ -131,6 +138,7 @@ async function Settings() {
           : { text: "Belum ada situs", tone: "warn" }
         : { text: "Mati", tone: "off" },
     },
+    { id: "cadangan", label: "Cadangan & ekspor", status: { text: "ZIP · JSON", tone: "plain" } },
     { id: "integrasi", label: "Integrasi", status: { text: "MCP", tone: "plain" } },
   ];
 
@@ -139,7 +147,7 @@ async function Settings() {
       <SettingsNav sections={sections} />
       <div className="min-w-0 space-y-12 pb-24 lg:pb-[45vh]">
         <Section id="umum" title="Umum" description="Nama situs, tombol di header, menu Sumber daya, dan kolom footer.">
-          <SiteSettingsForm initial={site} />
+          <SiteSettingsForm initial={site} languages={languages.languages} defaultLabel={languages.defaultLabel} />
         </Section>
         <Section id="ai">
           <AiSettingsForm initial={toView(ai)} />
@@ -164,6 +172,9 @@ async function Settings() {
         </Section>
         <Section id="widget">
           <WidgetSettingsForm initial={widget} siteUrl={process.env.SITE_URL?.replace(/\/+$/, "") || null} themeAccent={themeAccent} askAiAvailable={askAiAvailable} />
+        </Section>
+        <Section id="cadangan">
+          <ExportPanel {...exportCounts} />
         </Section>
         <Section id="integrasi" title="Integrasi" description="Hubungkan aplikasi AI lain ke dokumentasi ini, atau beri AI Chat alat dari server luar.">
           <Panel className="max-w-3xl divide-y divide-line">

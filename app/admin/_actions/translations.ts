@@ -6,7 +6,7 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
 import { logActivity, pageLabel } from "@/lib/activity";
-import { LANGUAGE_CODE, type LanguageSettings } from "@/lib/i18n";
+import { LANGUAGE_CODE, RESERVED_CODES, type LanguageSettings } from "@/lib/i18n";
 import { type TranslationRow, createTranslation, readLanguages, translateWithAi, translationInfo } from "@/lib/translations";
 import { isAiReady } from "@/lib/ai/config";
 
@@ -70,6 +70,9 @@ export async function saveLanguageSettings(input: LanguageSettings): Promise<Res
   const codes = value.languages.map((language) => language.code);
   if (new Set(codes).size !== codes.length) return { ok: false, error: "Setiap bahasa hanya boleh muncul sekali." };
   if (codes.includes(value.defaultLocale)) return { ok: false, error: "Bahasa utama tidak perlu ditambahkan lagi sebagai bahasa tambahan." };
+  // Each language gets a home at /<code>; it must not take over a path the site already uses.
+  const reserved = codes.find((code) => RESERVED_CODES.includes(code));
+  if (reserved) return { ok: false, error: `Kode “${reserved}” sudah dipakai alamat situs (/${reserved}). Pilih kode lain.` };
 
   const before = await readLanguages();
   if (before.defaultLocale !== value.defaultLocale) {

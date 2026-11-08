@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import {
   getAskAiAvailable,
+  getHomeAlternates,
   getLanguageSettings,
   getNavigation,
   getSearchIndex,
@@ -12,14 +13,17 @@ import { SiteProvider } from "@/components/site-context";
 import { SiteHeader } from "@/components/site-header";
 
 export default async function SiteLayout({ children }: LayoutProps<"/">) {
-  const [site, tabs, searchIndex, askAi, languages, alternates] = await Promise.all([
+  const [site, tabs, searchIndex, askAi, languages, pageAlternates, homes] = await Promise.all([
     getSiteSettings(),
     getNavigation(),
     getSearchIndex(),
     getAskAiAvailable(),
     getLanguageSettings(),
     getTranslationAlternates(),
+    getHomeAlternates(),
   ]);
+  // The switcher also moves between homes ("/" ↔ "/en") once a language has its own.
+  const alternates = { ...pageAlternates, ...Object.fromEntries(Object.values(homes).map((href) => [href, homes])) };
   // Extra languages: their navigation and search entries, picked on the client by the path (/docs/<code>/…).
   const codes = languages.languages.map((language) => language.code);
   const [localeTabs, localeIndexes] = await Promise.all([

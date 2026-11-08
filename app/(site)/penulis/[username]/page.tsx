@@ -17,6 +17,13 @@ import { T } from "@/components/locale-text";
  * Tema → Penulis is off.
  */
 
+/**
+ * The page decides "not found" from `params` before anything streams (a real
+ * HTTP 404 instead of a 200 with not-found content), so a navigation to a slug
+ * that wasn't prerendered waits for that check instead of showing a fallback first.
+ */
+export const instant = false;
+
 export async function generateStaticParams() {
   const usernames = await getAuthorUsernames();
   // Cache Components needs at least one param; "_" renders the 404 page.
@@ -42,18 +49,19 @@ export async function generateMetadata({ params }: PageProps<"/penulis/[username
   };
 }
 
-export default function AuthorPage({ params }: PageProps<"/penulis/[username]">) {
+export default async function AuthorPage({ params }: PageProps<"/penulis/[username]">) {
+  // Checked before anything streams, so a missing author is a real HTTP 404.
+  const { username } = await params;
+  const data = await load(username);
+  if (!data) notFound();
   return (
     <Suspense fallback={<div className="mx-auto h-96 max-w-5xl animate-pulse px-5 pt-12 sm:px-8" />}>
-      <AuthorContent params={params} />
+      <AuthorContent data={data} />
     </Suspense>
   );
 }
 
-async function AuthorContent({ params }: Pick<PageProps<"/penulis/[username]">, "params">) {
-  const { username } = await params;
-  const data = await load(username);
-  if (!data) notFound();
+async function AuthorContent({ data }: { data: NonNullable<Awaited<ReturnType<typeof load>>> }) {
   const { author, pages } = data;
   const languages = await getLanguageSettings();
   // Cards of every language the author has written in.

@@ -138,6 +138,12 @@ Aplikasi berjalan sebagai image Docker yang dibangun GitHub (`ghcr.io/teknik-git
 
 `pnpm prod:logs` menampilkan log aplikasi, `pnpm prod:stop` menghentikannya. Cek kesehatan: `GET /api/health`.
 
+### Cadangan dan pemulihan
+
+`pnpm backup -- --prod` membuat `backups/docsku-prod-<tanggal>.tar.gz` berisi dump database (dijalankan di dalam container PostgreSQL, jadi host tidak perlu alat PostgreSQL), semua gambar upload, dan `manifest.json`. Simpan salinannya di mesin lain. Memulihkan: `pnpm restore -- <arsip> --prod --yes` (tanpa `--yes` hanya menampilkan rencananya). Database diganti seluruhnya dengan isi arsip; aplikasi dihentikan selama pemulihan lalu dijalankan lagi. Untuk memeriksa arsip tanpa menyentuh data asli: `pnpm restore -- <arsip> --db docsku_cek --no-uploads --yes`.
+
+Dari dasbor, **Pengaturan → Cadangan & ekspor** mengunduh dokumentasi sebagai ZIP berisi berkas MDX per halaman (bisa diimpor kembali), atau data lengkap sebagai JSON tanpa rahasia. **Halaman → Impor** menerima berkas Markdown/MDX atau ZIP dari GitBook, Notion, Docusaurus, Mintlify, atau ekspor Docsku, dan menjadikannya draf.
+
 ### Cloudflare
 
 Di belakang Cloudflare, `X-Forwarded-For` dari proxy Anda berisi IP server Cloudflare, bukan IP pengunjung, sehingga batas per IP (login, komentar, statistik) akan dipakai bersama semua pengunjung. Isi `TRUST_PROXY=cloudflare` di `.env.production`: aplikasi lalu membaca IP pengunjung dari header `CF-Connecting-IP`.
@@ -173,10 +179,12 @@ Catatan:
 | `pnpm prod:deploy` | Migrasi, build, dan jalankan versi produksi di Docker |
 | `pnpm prod:logs` / `pnpm prod:stop` | Log / hentikan aplikasi produksi |
 | `pnpm release <versi>` | Menaikkan versi, membuat tag, dan GitHub release |
+| `pnpm backup` / `pnpm backup -- --prod` | Arsip database + gambar ke `backups/` |
+| `pnpm restore -- <arsip> [--prod] --yes` | Memulihkan arsip (mengganti database) |
 
 ## Catatan
 
-- Gambar yang diunggah disimpan di `UPLOAD_DIR` (bawaan `./storage/uploads`). Sertakan folder ini dalam backup bersama database.
+- Gambar yang diunggah disimpan di `UPLOAD_DIR` (bawaan `./storage/uploads`). `pnpm backup` menyertakan folder ini bersama database.
 - Halaman terjadwal diterbitkan oleh server setiap menit. Di platform tanpa server yang berjalan terus (serverless), panggil `POST /api/internal/publish-scheduled` dengan header `Authorization: Bearer $CRON_SECRET` dari cron eksternal, lalu set `DISABLE_SCHEDULER=1`.
 - Keamanan: jalankan produksi (`pnpm build && pnpm start`) di belakang reverse proxy berHTTPS (Caddy/Nginx), lalu set `TRUST_PROXY=1` agar batas percobaan login juga dihitung per IP. Tanpa proxy, header `X-Forwarded-*` diabaikan karena bisa dipalsukan klien.
 - Jika situs diakses lewat domain atau tunnel saat mode dev, tambahkan `DEV_ORIGINS=nama.domain` agar halaman bisa ter-hydrate.

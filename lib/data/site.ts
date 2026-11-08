@@ -84,12 +84,34 @@ export async function getCommentSettings(): Promise<CommentSettings> {
   return { ...DEFAULT_COMMENTS, ...(await readSetting<Partial<CommentSettings>>("comments")) };
 }
 
-/** The published home sections (settings key "home"), or null when the builder was never used. */
-export async function getHomeSections(): Promise<HomeSection[] | null> {
+/** Settings key of a language's published home ("home" for the default language, "home:<code>" otherwise). */
+export const homeKey = (locale?: string) => (locale ? `home:${locale}` : "home");
+
+/**
+ * The published home sections (settings key "home"), or null when the builder
+ * was never used. With `locale`: that extra language's home (`home:<code>`), or null.
+ */
+export async function getHomeSections(locale?: string): Promise<HomeSection[] | null> {
   "use cache";
   cacheTag("settings");
   cacheLife("max");
-  return parseHomeSections(await readSetting<unknown>("home"));
+  return parseHomeSections(await readSetting<unknown>(homeKey(locale)));
+}
+
+/**
+ * The homes of every language that has one ({ id: "/", en: "/en" }), for the
+ * switcher, hreflang and the sitemap; empty when no extra language has a published home.
+ */
+export async function getHomeAlternates(): Promise<Alternates> {
+  "use cache";
+  cacheTag("settings");
+  cacheLife("max");
+  const languages = await getLanguageSettings();
+  if (!languages.languages.length || buildingWithoutDatabase) return {};
+  const homes = await Promise.all(languages.languages.map(async (language) => ((await getHomeSections(language.code)) ? language.code : null)));
+  const codes = homes.filter((code): code is string => code !== null);
+  if (!codes.length) return {};
+  return { [languages.defaultLocale]: "/", ...Object.fromEntries(codes.map((code) => [code, `/${code}`])) };
 }
 
 export const DEFAULT_ASK_AI: AskAiSettings = { enabled: true, perMinute: 5, dailyLimit: 500 };

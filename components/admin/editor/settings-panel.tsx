@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { ExternalLink, History, RotateCcw, Trash2, X } from "lucide-react";
+import { ExternalLink, Trash2, X } from "lucide-react";
 import { deletePage, setFeatured, setNavSection, updateSlug } from "@/app/admin/_actions/pages";
 import { formatDateTime } from "@/components/admin/format";
 import { ImageDialog } from "@/components/admin/editor/image-dialog";
@@ -12,24 +12,10 @@ import { confirmDialog } from "@/components/admin/dialog";
 import { VisibilityToggle } from "@/components/admin/editor/visibility-toggle";
 import { TranslationSection } from "@/components/admin/editor/translation-section";
 import { AuthorSection } from "@/components/admin/editor/author-section";
+import { RevisionHistory, type RevisionItem } from "@/components/admin/editor/revision-history";
+import { SaveTemplateSection } from "@/components/admin/editor/save-template";
 
-export type RevisionItem = {
-  id: string;
-  title: string;
-  reason: string;
-  createdAt: string;
-  author: string | null;
-};
-
-const REASONS: Record<string, string> = {
-  save: "Disimpan",
-  publish: "Diterbitkan",
-  schedule: "Dijadwalkan",
-  restore: "Dipulihkan",
-  import: "Diimpor",
-  ai: "Dibuat dengan AI",
-  mcp: "Lewat MCP",
-};
+export type { RevisionItem } from "@/components/admin/editor/revision-history";
 
 /** Navigation info for the editor (see navigationForEditor in lib/automation.ts). */
 export type EditorNavigation = {
@@ -60,6 +46,8 @@ export function SettingsPanel({
   title,
   description,
   onRestore,
+  onFlush,
+  isAdmin = false,
   onClose,
 }: {
   pageId: string;
@@ -79,6 +67,9 @@ export function SettingsPanel({
   title: string;
   description: string;
   onRestore: (revisionId: string) => Promise<void>;
+  /** Saves pending edits now (before saving the page as a template). */
+  onFlush: () => Promise<boolean>;
+  isAdmin?: boolean;
   onClose: () => void;
 }) {
   const [value, setValue] = useState(slug);
@@ -219,50 +210,9 @@ export function SettingsPanel({
           url={isHome ? "/" : `/docs/${slug}`}
         />
 
-        <section>
-          <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-            <History className="size-4" />
-            Riwayat revisi
-          </h3>
-          <p className="mb-3 text-xs text-fg-subtle">
-            Revisi dibuat saat Anda menekan Ctrl+S, menerbitkan, atau memulihkan. Memulihkan hanya mengubah draf.
-          </p>
-          {revisions.length === 0 ? (
-            <p className="text-sm text-fg-subtle">Belum ada revisi.</p>
-          ) : (
-            <ul className="divide-y divide-line rounded-lg border border-line">
-              {revisions.map((revision, i) => (
-                <li key={revision.id} className="flex items-center gap-2 px-3 py-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm">
-                      {REASONS[revision.reason] ?? revision.reason}
-                      {i === 0 && <span className="ml-1.5 text-xs text-fg-subtle">(terbaru)</span>}
-                    </span>
-                    <span className="block truncate text-xs text-fg-subtle">
-                      {formatDateTime(revision.createdAt)}
-                      {revision.author && ` · ${revision.author}`}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const ok = await confirmDialog({
-                        title: "Pulihkan revisi ini?",
-                        message: "Isi draf diganti dengan revisi ini. Versi sekarang tetap tersimpan di riwayat revisi.",
-                        confirmLabel: "Pulihkan",
-                      });
-                      if (ok) onRestore(revision.id);
-                    }}
-                    className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-fg-muted hover:bg-fill hover:text-fg"
-                  >
-                    <RotateCcw className="size-3" />
-                    Pulihkan
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <RevisionHistory pageId={pageId} revisions={revisions} status={status} isAdmin={isAdmin} onRestore={onRestore} />
+
+        {!isHome && <SaveTemplateSection pageId={pageId} title={title} onFlush={onFlush} />}
 
         {!isHome && (
         <section className="border-t border-line pt-6">

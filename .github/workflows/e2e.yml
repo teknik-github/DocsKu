@@ -1,0 +1,50 @@
+# End-to-end tests (tests/e2e, `pnpm test:e2e`) against a throwaway Postgres.
+# Manual only for now: CI is switched off for this repository. To run it on
+# every pull request, add under `on:`
+#   pull_request:
+#     branches: [main]
+name: E2E tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: docsku
+          POSTGRES_PASSWORD: docsku
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U docsku" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CI: "1"
+      # The suite creates and drops this database itself.
+      E2E_DATABASE_URL: postgres://docsku:docsku@127.0.0.1:5432/docsku_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+            tests/e2e/.state/*.log
+          retention-days: 7

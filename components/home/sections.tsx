@@ -4,13 +4,14 @@ import { Icon } from "@/components/icon";
 import { SearchField } from "@/components/search";
 import { SiteFooter } from "@/components/site-footer";
 import { PageCardView } from "@/components/publication/cards";
-import { getNavigation, getPageCards, getPopularPages, getSiteSettings } from "@/lib/data/site";
+import { getNavigation, getPageCards, getPopularPages, getSiteSettings, getTranslationAlternates } from "@/lib/data/site";
+import { dateLocale, type I18nKey, t } from "@/lib/i18n";
 import { allPages, sectionPages } from "@/lib/navigation";
 import { categoryIcon } from "@/lib/category-icon";
 import { formatDate } from "@/lib/format";
 import { mdxToDoc } from "@/lib/content/mdx-to-doc";
 import { RenderDoc } from "@/lib/content/render";
-import type { HomeButton, HomeSection, NavLink, NavTab, PageCard, SiteSettings } from "@/lib/site-types";
+import { type HomeButton, type HomeSection, type NavLink, type NavTab, type PageCard, type SiteSettings, siteForLocale } from "@/lib/site-types";
 
 /**
  * The public home page: sections built at /admin/home, rendered in order.
@@ -19,6 +20,12 @@ import type { HomeButton, HomeSection, NavLink, NavTab, PageCard, SiteSettings }
  */
 
 type Data = {
+  /** The language of this home: undefined for the default language, else an extra language's code. */
+  locale: string | undefined;
+  /** Reader chrome in that language. */
+  tx: (key: I18nKey, vars?: Record<string, string | number>) => string;
+  /** A docs href in this language: the translation when there is one (manual article picks are stored as originals). */
+  localize: (href: string) => string;
   site: SiteSettings;
   tabs: NavTab[];
   pages: ReturnType<typeof allPages>;
@@ -28,17 +35,41 @@ type Data = {
 };
 type Of<T extends HomeSection["type"]> = Extract<HomeSection, { type: T }>;
 
-async function loadData(): Promise<Data> {
-  const [site, tabs, cards, popular] = await Promise.all([getSiteSettings(), getNavigation(), getPageCards(), getPopularPages(24)]);
+async function loadData(locale?: string): Promise<Data> {
+  const [site, tabs, cards, popular, alternates] = await Promise.all([
+    getSiteSettings(),
+    getNavigation(locale),
+    getPageCards(locale),
+    getPopularPages(24, locale),
+    locale ? getTranslationAlternates() : Promise.resolve({}),
+  ]);
   const pages = allPages(tabs);
-  return { site, tabs, pages, byHref: new Map(pages.map((p) => [p.href, p])), cards: new Map(cards.map((c) => [c.href, c])), popular };
+  const localize = (href: string) => (locale ? ((alternates as Record<string, Record<string, string>>)[href]?.[locale] ?? href) : href);
+  return {
+    locale,
+    tx: (key, vars) => t(locale ?? "id", key, vars),
+    localize,
+    site: siteForLocale(site, locale),
+    tabs,
+    pages,
+    byHref: new Map(pages.map((p) => [p.href, p])),
+    cards: new Map(cards.map((c) => [c.href, c])),
+    popular,
+  };
 }
+
+/** "Oct 18, 2026" in an extra language's own format (same time zone as formatDate). */
+const localDate = (value: string, locale: string) =>
+  new Intl.DateTimeFormat(dateLocale(locale), { day: "numeric", month: "short", year: "numeric", timeZone: process.env.NEXT_PUBLIC_TIME_ZONE || "Asia/Jakarta" }).format(
+    new Date(value),
+  );
 
 const TONES = { plain: "", muted: "border-y border-line bg-fill/50", accent: "border-y border-line bg-accent-soft/40" };
 const GRID = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-4" };
 
-export async function HomeSections({ sections }: { sections: HomeSection[] }) {
-  const data = await loadData();
+/** `locale`: an extra language's home (/<code>); its navigation, cards and reader chrome. */
+export async function HomeSections({ sections, locale }: { sections: HomeSection[]; locale?: string }) {
+  const data = await loadData(locale);
   const visible = sections.filter((s) => !s.hidden);
   // Pair consecutive half-width sections into rows (the hero is always full width).
   const rows: HomeSection[][] = [];
@@ -52,7 +83,7 @@ export async function HomeSections({ sections }: { sections: HomeSection[] }) {
   return (
     <>
       <main className="pb-16">
-        {visible.length === 0 && <p className="mx-auto max-w-6xl px-5 py-24 text-center text-fg-muted sm:px-8">Beranda masih kosong.</p>}
+        {visible.length === 0 && <p className="mx-auto max-w-6xl px-5 py-24 text-center text-fg-muted sm:px-8">{data.tx("homeEmpty")}</p>}
         {rows.map((row) => {
           const [first] = row;
           if (first.type === "hero") return <Hero key={first.id} s={first} data={data} />;
@@ -208,15 +239,15 @@ function Hero({ s, data }: { s: Of<"hero">; data: Data }) {
     >
       <div className={`mx-auto px-5 py-16 sm:px-8 lg:py-24 ${center ? "max-w-3xl text-center" : "max-w-6xl"}`}>
         <div className={center ? "" : "max-w-2xl"}>
-          <p className={`text-sm font-medium ${photo ? "text-white/85" : "text-accent"}`}>{s.eyebrow || `Pusat bantuan ${data.site.name}`}</p>
+          <p className={`text-sm font-medium ${photo ? "text-white/85" : "text-accent"}`}>{s.eyebrow || data.tx("helpCenterOf", { name: data.site.name })}</p>
           <h1 className={`mt-3 font-serif text-4xl font-light tracking-tight text-balance sm:text-5xl ${photo ? "text-white" : "text-fg"}`}>{s.title}</h1>
           {subtitle && <p className={`mt-4 max-w-xl text-lg ${center ? "mx-auto" : ""} ${photo ? "text-white/85" : "text-fg-muted"}`}>{subtitle}</p>}
           {s.showSearch && (
-            <SearchField label={s.searchLabel || "Cari"} className={`mt-8 h-14 max-w-2xl rounded-xl bg-surface! px-5 text-base shadow-sm ${center ? "mx-auto" : ""}`} />
+            <SearchField label={s.searchLabel || data.tx("search")} className={`mt-8 h-14 max-w-2xl rounded-xl bg-surface! px-5 text-base shadow-sm ${center ? "mx-auto" : ""}`} />
           )}
           {chips.length > 0 && (
             <div className={`mt-5 flex flex-wrap items-center gap-2 text-sm ${center ? "justify-center" : ""}`}>
-              <span className={photo ? "text-white/80" : "text-fg-subtle"}>Populer:</span>
+              <span className={photo ? "text-white/80" : "text-fg-subtle"}>{data.tx("popularLabel")}</span>
               {chips.map((page) => (
                 <Link
                   key={page.href}
@@ -236,7 +267,7 @@ function Hero({ s, data }: { s: Of<"hero">; data: Data }) {
   );
 }
 
-function CategoryCard({ title, image, links, max }: { title: string; image?: string; links: NavLink[]; max: number }) {
+function CategoryCard({ title, image, links, max, tx }: { title: string; image?: string; links: NavLink[]; max: number; tx: Data["tx"] }) {
   const shown = links.slice(0, max);
   const rest = links.slice(max);
   return (
@@ -255,7 +286,7 @@ function CategoryCard({ title, image, links, max }: { title: string; image?: str
               {title}
             </Link>
           </h3>
-          <p className="mt-0.5 text-xs text-fg-subtle">{links.length} artikel</p>
+          <p className="mt-0.5 text-xs text-fg-subtle">{tx("articles", { n: links.length })}</p>
         </div>
       </div>
       {shown.length > 0 && (
@@ -269,8 +300,8 @@ function CategoryCard({ title, image, links, max }: { title: string; image?: str
         // Native disclosure: the rest of the category opens in place, without JavaScript.
         <details className="group">
           <summary className="mt-2 flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-accent [&::-webkit-details-marker]:hidden">
-            <span className="group-open:hidden">Lihat semua {links.length} artikel</span>
-            <span className="hidden group-open:inline">Tampilkan lebih sedikit</span>
+            <span className="group-open:hidden">{tx("seeAllArticles", { n: links.length })}</span>
+            <span className="hidden group-open:inline">{tx("showLess")}</span>
             <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden />
           </summary>
           <ul className="mt-1">
@@ -296,12 +327,12 @@ function ArticleLink({ link }: { link: NavLink }) {
 }
 
 function Categories({ s, data }: { s: Of<"categories">; data: Data }) {
-  if (data.tabs.length === 0) return <p className="rounded-2xl border border-line bg-surface p-8 text-center text-fg-muted">Belum ada artikel yang diterbitkan.</p>;
+  if (data.tabs.length === 0) return <p className="rounded-2xl border border-line bg-surface p-8 text-center text-fg-muted">{data.tx("noArticles")}</p>;
   const grid = (tab: NavTab) => (
     <div className={`grid gap-5 ${GRID[s.columns]}`}>
       {tab.sections.map((section) => {
         const links = sectionPages(section);
-        return links.length ? <CategoryCard key={section.title} title={section.title} image={section.image} links={links} max={s.links} /> : null;
+        return links.length ? <CategoryCard key={section.title} title={section.title} image={section.image} links={links} max={s.links} tx={data.tx} /> : null;
       })}
     </div>
   );
@@ -321,7 +352,7 @@ function Categories({ s, data }: { s: Of<"categories">; data: Data }) {
           <div className="mb-5 flex items-end justify-between gap-4">
             <h3 className="text-lg font-semibold text-fg">{tab.title}</h3>
             <Link href={tab.href} prefetch={true} className="flex shrink-0 items-center gap-1 text-sm text-fg-muted hover:text-fg">
-              Buka {tab.title}
+              {data.tx("openTab", { name: tab.title })}
               <ArrowRight className="size-4" />
             </Link>
           </div>
@@ -343,7 +374,7 @@ function Articles({ s, data }: { s: Of<"articles">; data: Data }) {
       .sort((a, b) => b.publishedAt!.localeCompare(a.publishedAt!))
       .map((c) => c.href);
   } else if (s.source === "featured") hrefs = [...data.cards.values()].filter((c) => c.featured && data.byHref.has(c.href)).map((c) => c.href);
-  else hrefs = s.pages.filter((href) => data.byHref.has(href));
+  else hrefs = s.pages.map(data.localize).filter((href) => data.byHref.has(href));
   const items = hrefs.slice(0, s.limit).flatMap((href) => {
     const page = data.byHref.get(href);
     return page ? [{ page, card: data.cards.get(href) }] : [];
@@ -359,7 +390,7 @@ function Articles({ s, data }: { s: Of<"articles">; data: Data }) {
         </h2>
       )}
       {items.length === 0 ? (
-        <p className="text-sm text-fg-subtle">Belum ada artikel untuk ditampilkan.</p>
+        <p className="text-sm text-fg-subtle">{data.tx("noArticlesToShow")}</p>
       ) : s.style === "cards" ? (
         <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
           {items.flatMap(({ page, card }) => (card ? [<PageCardView key={card.href} card={card} tag={page.section} />] : []))}
@@ -374,7 +405,7 @@ function Articles({ s, data }: { s: Of<"articles">; data: Data }) {
                   <span className="block font-medium text-fg group-hover:text-accent">{page.title}</span>
                   <span className="mt-0.5 block text-xs text-fg-subtle">
                     {s.source === "latest" && card?.publishedAt
-                      ? `${formatDate(card.publishedAt)} · ${card.readingMinutes} menit baca`
+                      ? `${data.locale ? localDate(card.publishedAt, data.locale) : formatDate(card.publishedAt)} · ${data.tx("minRead", { n: card.readingMinutes })}`
                       : `${page.tab} › ${page.section}`}
                   </span>
                 </span>

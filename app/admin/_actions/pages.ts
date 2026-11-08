@@ -13,6 +13,7 @@ import { NO_NAV, readNavigation, resolveSection, writeNavigation } from "@/lib/a
 import { findCategory, placePages } from "@/lib/categories";
 import { forgetRedirects, recordSlugChange } from "@/lib/redirects";
 import { slugLanguageError } from "@/lib/translations";
+import { templateSeed } from "@/lib/templates";
 import {
   NOT_FOUND,
   addRevision,
@@ -39,9 +40,12 @@ function refreshPublicSite() {
 }
 
 /**
- * New empty draft, opened in the editor. With a `category` field (a navigation
+ * New draft, opened in the editor. With a `category` field (a navigation
  * section id, from Halaman → a category) the page is listed in that category at
  * once: drafts stay off the public site, and automation won't move it on publish.
+ * With a `template` field ("builtin:<key>" or a page_templates id, see
+ * lib/templates.ts) the working copy starts from that template; the live
+ * columns stay empty until the first publish.
  */
 export async function createPage(formData?: FormData) {
   const user = await authorize();
@@ -49,22 +53,26 @@ export async function createPage(formData?: FormData) {
   const wanted = formData?.get("category");
   const navigation = typeof wanted === "string" && wanted ? await readNavigation() : null;
   const category = navigation && typeof wanted === "string" && findCategory(navigation, wanted) ? wanted : null;
+  const templateId = formData?.get("template");
+  const seed = typeof templateId === "string" && templateId ? await templateSeed(templateId) : null;
   const slug = await uniqueSlug(PLACEHOLDER_SLUG);
   const [page] = await db
     .insert(schema.pages)
     .values({
       slug,
       title: "",
-      draftTitle: "",
+      draftTitle: seed?.title ?? "",
+      draftDescription: seed?.description ?? "",
       content: EMPTY_DOC,
-      draftContent: EMPTY_DOC,
+      draftContent: seed?.content ?? EMPTY_DOC,
       navSection: category,
       authorId: user.id,
       updatedById: user.id,
     })
     .returning({ id: schema.pages.id });
   if (navigation && category) await writeNavigation(placePages(navigation, [page.id], category));
-  await logActivity({ user, action: "page.create", target: { type: "page", id: page.id, label: "Tanpa judul" }, meta: category ? { category } : undefined });
+  const meta = { ...(category ? { category } : {}), ...(seed ? { template: seed.name } : {}) };
+  await logActivity({ user, action: "page.create", target: { type: "page", id: page.id, label: seed?.title || "Tanpa judul" }, meta: Object.keys(meta).length ? meta : undefined });
   redirect(`/admin/pages/${page.id}`);
 }
 
@@ -271,12 +279,22 @@ export async function restoreRevision(pageId: string, revisionId: string) {
     .where(and(eq(schema.pageRevisions.id, revisionId), eq(schema.pageRevisions.pageId, pageId)));
   if (!revision) return { ok: false as const, error: "Revisi tidak ditemukan." };
   const [page] = await db
-    .select({ status: schema.pages.status })
+    .select({
+      status: schema.pages.status,
+      title: schema.pages.draftTitle,
+      description: schema.pages.draftDescription,
+      content: schema.pages.draftContent,
+      seo: schema.pages.draftSeo,
+      cover: schema.pages.draftCoverImage,
+    })
     .from(schema.pages)
     .where(eq(schema.pages.id, pageId));
   if (!page) return { ok: false as const, error: NOT_FOUND };
 
   const draft = { title: revision.title, description: revision.description, content: revision.content, seo: revision.seo, cover: revision.coverImage };
+  // Keep the working copy being replaced, so a restore can always be undone from the history.
+  const current = { title: page.title, description: page.description, content: page.content, seo: page.seo, cover: page.cover };
+  if (JSON.stringify(current) !== JSON.stringify(draft)) await addRevision(pageId, current, "before-restore", user.id);
   await db
     .update(schema.pages)
     .set({

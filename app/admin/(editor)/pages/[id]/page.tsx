@@ -17,7 +17,7 @@ export default function EditPage({ params }: PageProps<"/admin/pages/[id]">) {
 }
 
 async function EditorLoader({ params }: Pick<PageProps<"/admin/pages/[id]">, "params">) {
-  await requireUser();
+  const user = await requireUser();
   const { id } = await params;
   const [page, revisions, aiEnabled, navigation, automation] = await Promise.all([
     getPageForEditor(id),
@@ -49,6 +49,7 @@ async function EditorLoader({ params }: Pick<PageProps<"/admin/pages/[id]">, "pa
       revisions={revisions.map((revision) => ({ ...revision, createdAt: revision.createdAt.toISOString() }))}
       aiEnabled={aiEnabled}
       navigation={{ ...navigation, navSection: page.navSection, auto: automation.navigation }}
+      isAdmin={user.role === "admin"}
     />
   );
 }

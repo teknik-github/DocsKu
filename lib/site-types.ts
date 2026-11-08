@@ -23,7 +23,31 @@ export type SiteSettings = {
   headerCta: { title: string; href: string } | null;
   resources: ExternalLink[];
   footer: { title: string; links: ExternalLink[] }[];
+  /**
+   * Per extra language (code → overrides, Pengaturan → Umum): the site
+   * description, header button and footer columns readers of that language see.
+   * A missing field falls back to the default language's.
+   */
+  localized?: Record<string, LocalizedSite>;
 };
+
+export type LocalizedSite = {
+  description?: string;
+  headerCta?: { title: string; href: string } | null;
+  footer?: { title: string; links: ExternalLink[] }[];
+};
+
+/** The site settings as readers of `locale` see them (description, header button, footer). */
+export function siteForLocale(site: SiteSettings, locale: string | undefined): SiteSettings {
+  const own = locale ? site.localized?.[locale] : undefined;
+  if (!own) return site;
+  return {
+    ...site,
+    description: own.description || site.description,
+    headerCta: own.headerCta !== undefined ? own.headerCta : site.headerCta,
+    footer: own.footer ?? site.footer,
+  };
+}
 
 // ---- Stored navigation (edited in the dashboard) ----
 

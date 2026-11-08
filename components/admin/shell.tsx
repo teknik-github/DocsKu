@@ -28,7 +28,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { logoutAction } from "@/app/admin/(auth)/actions";
-import { createPage } from "@/app/admin/_actions/pages";
+import { NewPageButton } from "@/components/admin/new-page-button";
 import { ThemeToggle } from "@/components/theme";
 import type { SessionUser } from "@/lib/auth/dal";
 import { SIDEBAR_COOKIE } from "@/lib/sidebar-cookie";
@@ -58,6 +58,7 @@ const GROUPS: Group[] = [
         href: "/admin/pages",
         label: "Halaman",
         icon: FileText,
+        also: ["/admin/templates"],
         badge: (c) => (c.drafts ? { value: c.drafts, hint: `${c.drafts} draf atau perubahan belum terbit`, quiet: true } : null),
       },
       {
@@ -154,19 +155,16 @@ function SidebarContent({
       </div>
 
       <div className={collapsed ? "px-2" : "px-3"}>
-        <form action={createPage}>
-          <button
-            type="submit"
-            title={collapsed ? "Halaman baru" : undefined}
-            aria-label="Halaman baru"
-            className={`flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-accent text-sm font-medium text-white transition-colors hover:bg-accent-strong ${
-              collapsed ? "px-0" : "px-3"
-            }`}
-          >
-            <Plus className="size-4" />
-            {!collapsed && "Halaman baru"}
-          </button>
-        </form>
+        <NewPageButton
+          title={collapsed ? "Halaman baru" : undefined}
+          ariaLabel="Halaman baru"
+          className={`flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-accent text-sm font-medium text-white transition-colors hover:bg-accent-strong ${
+            collapsed ? "px-0" : "px-3"
+          }`}
+        >
+          <Plus className="size-4" />
+          {!collapsed && "Halaman baru"}
+        </NewPageButton>
       </div>
 
       <nav aria-label="Menu dasbor" className={`flex-1 overflow-y-auto py-3 ${collapsed ? "px-2" : "px-3"}`}>

@@ -6,6 +6,13 @@ import { RenderDoc } from "@/lib/content/render";
 import { slugToHref } from "@/lib/navigation";
 import { WidgetBack, WidgetView } from "@/components/widget/article-tools";
 
+/**
+ * The page decides "not found" from `params` before anything streams (a real
+ * HTTP 404 instead of a 200 with not-found content), so a navigation to a slug
+ * that wasn't prerendered waits for that check instead of showing a fallback first.
+ */
+export const instant = false;
+
 export async function generateStaticParams() {
   const slugs = await getPublishedSlugs();
   // Cache Components needs at least one param; "_" renders the 404 page.
@@ -13,7 +20,11 @@ export async function generateStaticParams() {
 }
 
 /** A published article read inside the help widget, with a link to the full page. */
-export default function WidgetArticlePage({ params }: PageProps<"/widget/a/[...slug]">) {
+export default async function WidgetArticlePage({ params }: PageProps<"/widget/a/[...slug]">) {
+  // Checked before anything streams, so a missing page (or the widget switched off) is a real HTTP 404.
+  const { slug } = await params;
+  const [widget, page] = await Promise.all([getWidgetSettings(), getPublishedPage(slug.join("/"))]);
+  if (!widget.enabled || !page) notFound();
   return (
     <Suspense
       fallback={
@@ -25,15 +36,12 @@ export default function WidgetArticlePage({ params }: PageProps<"/widget/a/[...s
         </div>
       }
     >
-      <WidgetArticle params={params} />
+      <WidgetArticle page={page} />
     </Suspense>
   );
 }
 
-async function WidgetArticle({ params }: Pick<PageProps<"/widget/a/[...slug]">, "params">) {
-  const { slug } = await params;
-  const [widget, page] = await Promise.all([getWidgetSettings(), getPublishedPage(slug.join("/"))]);
-  if (!widget.enabled || !page) notFound();
+function WidgetArticle({ page }: { page: NonNullable<Awaited<ReturnType<typeof getPublishedPage>>> }) {
   const href = slugToHref(page.slug);
 
   return (

@@ -28,8 +28,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // The e2e suite (tests/e2e) builds into its own directory so it never touches
+  // the dev server's .next/dev, and runs it with `next start` (no standalone copy).
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // Self-contained server in .next/standalone for the Docker image (see Dockerfile).
-  output: "standalone",
+  output: process.env.NEXT_DIST_DIR ? undefined : "standalone",
   cacheComponents: true,
   partialPrefetching: true,
   reactCompiler: true,
