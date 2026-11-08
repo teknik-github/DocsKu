@@ -553,3 +553,36 @@ export const searchClicks = pgTable(
   },
   (t) => [primaryKey({ columns: [t.query, t.pageId, t.day] }), index("search_clicks_day_idx").on(t.day)],
 );
+
+/**
+ * Archived documentation versions (/docs/v/<slug>/…): a read-only snapshot of
+ * every public published page and the navigation at the time it was archived.
+ * The live docs are always the newest version.
+ */
+export const docVersions = pgTable("doc_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** URL part, e.g. "1.0" → /docs/v/1.0. */
+  slug: text("slug").notNull().unique(),
+  label: text("label").notNull(),
+  note: text("note").notNull().default(""),
+  /** The resolved navigation (NavTab[]) with hrefs pointing into this version. */
+  navigation: jsonb("navigation").$type<unknown[]>().notNull(),
+  createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const docVersionPages = pgTable(
+  "doc_version_pages",
+  {
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => docVersions.id, { onDelete: "cascade" }),
+    /** The page's slug at archive time (the URL is /docs/v/<version>/<slug>). */
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    content: jsonb("content").$type<JSONContent>().notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.versionId, t.slug] })],
+);

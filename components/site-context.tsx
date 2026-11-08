@@ -22,7 +22,15 @@ type SiteData = {
   i18n?: SiteI18n;
   /** The glossary has terms, so /glosarium exists (linked from the footer). */
   glossary?: boolean;
+  /** Archived documentation versions (/docs/v/<slug>/…) and the live docs' name; absent when none were archived. */
+  versions?: { current: string; list: { slug: string; label: string; tabs: NavTab[] }[] };
 };
+
+/** /docs/v/<slug>… → that archived version, if it exists. */
+export function versionFromPath(pathname: string, versions: SiteData["versions"]) {
+  const slug = pathname.match(/^\/docs\/v\/([^/]+)/)?.[1];
+  return slug ? versions?.list.find((version) => version.slug === slug) : undefined;
+}
 
 const SiteContext = createContext<SiteData | null>(null);
 
@@ -39,6 +47,9 @@ export function useSite(): SiteData & { locale: string; homeHref: string } {
   const value = use(SiteContext);
   const pathname = usePathname();
   if (!value) throw new Error("useSite must be used inside <SiteProvider>");
+  // An archived version brings its own navigation (sidebar, header tabs, prev/next).
+  const archived = versionFromPath(pathname, value.versions);
+  if (archived) return { ...value, tabs: archived.tabs, locale: value.i18n?.defaultLocale ?? "id", homeHref: "/" };
   const i18n = value.i18n;
   if (!i18n) return { ...value, locale: "id", homeHref: "/" };
   const locale = localeFromPath(pathname, i18n);

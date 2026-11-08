@@ -10,7 +10,7 @@ import { HUB_ANCHOR_LAYOUTS } from "@/lib/docs-layouts";
 import { Logo } from "@/components/logo";
 import { SearchIconButton } from "@/components/search";
 import { SidebarNav } from "@/components/sidebar";
-import { useSite } from "@/components/site-context";
+import { useSite, versionFromPath } from "@/components/site-context";
 import { ThemeToggle } from "@/components/theme";
 import { hubHref, t } from "@/lib/i18n";
 
@@ -58,6 +58,7 @@ export function SiteHeader() {
 
       <div className="ml-auto flex items-center gap-1.5">
         <SearchIconButton />
+        <VersionMenu />
         <LanguageMenu />
         <ThemeToggle />
         {site.headerCta && (
@@ -132,6 +133,62 @@ function TabMenu({ tab, className }: { tab: NavTab; className: string }) {
                 ))}
               </ul>
             </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Shown once a documentation version was archived: the live docs and each archived version. */
+function VersionMenu() {
+  const pathname = usePathname();
+  const { versions } = useSite();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (!versions?.list.length) return null;
+  const archived = versionFromPath(pathname, versions);
+  const current = archived?.label ?? versions.current;
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-label={`Versi: ${current}`}
+        data-testid="version-menu"
+        className={`inline-flex h-8 max-w-36 items-center gap-1 rounded-full px-2.5 text-xs font-medium transition-colors hover:bg-fill ${archived ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300" : "text-fg-muted hover:text-fg"}`}
+      >
+        <span className="truncate">{current}</span>
+        <ChevronDown className="size-3.5 shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute top-full right-0 mt-2 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-lg">
+          <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">Versi</p>
+          <Link href="/docs" onClick={() => setOpen(false)} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-fill">
+            <span className="flex-1 text-fg">
+              {versions.current} <span className="text-xs text-fg-subtle">(terbaru)</span>
+            </span>
+            {!archived && <Check className="size-3.5 text-accent" />}
+          </Link>
+          {versions.list.map((version) => (
+            <Link key={version.slug} href={`/docs/v/${version.slug}`} onClick={() => setOpen(false)} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-fill">
+              <span className="flex-1 text-fg">{version.label}</span>
+              {archived?.slug === version.slug && <Check className="size-3.5 text-accent" />}
+            </Link>
           ))}
         </div>
       )}

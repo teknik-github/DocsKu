@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import type { JSONContent } from "@tiptap/core";
 import { db, schema } from "@/db";
 import { getCommentSettings } from "@/lib/data/site";
 import { notify } from "@/lib/notify";
@@ -39,10 +40,14 @@ export async function POST(request: Request) {
   if (website || isUncountedVisit(request)) return new Response(null, { status: 204 });
 
   const [page] = await db
-    .select({ id: schema.pages.id, title: schema.pages.title })
+    .select({ id: schema.pages.id, title: schema.pages.title, content: schema.pages.content })
     .from(schema.pages)
     .where(and(eq(schema.pages.slug, slug), eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"), eq(schema.pages.visibility, "public")));
   if (!page) return Response.json({ error: "Halaman tidak ditemukan." }, { status: 404 });
+  // Only passages that are really on the page (no notes with made-up text).
+  const flat = (node: JSONContent): string => (node.type === "text" ? (node.text ?? "") : (node.content ?? []).map(flat).join(" "));
+  const pageText = flat(page.content).replace(/\s+/g, " ");
+  if (!pageText.includes(quote.slice(0, 120))) return Response.json({ error: "Bagian itu tidak ada di halaman." }, { status: 400 });
 
   const [recent] = await db
     .select({ n: sql<number>`count(*)::int` })
@@ -60,15 +65,23 @@ export async function POST(request: Request) {
     .values({ pageId: page.id, parentId: open?.id ?? null, authorId: null, source: "reader", quote: open ? "" : quote, body: text })
     .returning({ id: schema.pageNotes.id });
 
+  // Email the team about a page at most once an hour, and not for a repeat of an open passage.
+  if (open) return Response.json({ ok: true });
+  const [lately] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.pageNotes)
+    .where(and(eq(schema.pageNotes.pageId, page.id), eq(schema.pageNotes.source, "reader"), gt(schema.pageNotes.createdAt, sql`now() - interval '1 hour'`)));
+  // This note is one of them; any other means the team was already told within the hour.
+  if ((lately?.n ?? 0) > 1) return Response.json({ ok: true });
   await notify({
     type: "note.new",
-    noteId: open?.id ?? row.id,
+    noteId: row.id,
     pageId: page.id,
     pageTitle: page.title,
     by: "Pembaca",
     excerpt: text,
     quote,
-    reply: Boolean(open),
+    reply: false,
     participants: [],
   });
   return Response.json({ ok: true });

@@ -31,6 +31,8 @@ type Snapshot = {
   pages: Map<string, string>;
   languages: Set<string>;
   authors: Set<string>;
+  /** Archived documentation versions: version slug → its page slugs. */
+  archives: Map<string, Set<string>>;
   at: number;
 };
 
@@ -60,9 +62,22 @@ async function authorNames(username?: string) {
   return new Set(rows.map((row) => row.username));
 }
 
+async function archivedPages(version?: string) {
+  const rows = await db.execute<{ version: string; slug: string | null }>(sql`
+    select v.slug as version, p.slug from doc_versions v left join doc_version_pages p on p.version_id = v.id
+    ${version === undefined ? sql`` : sql`where v.slug = ${version}`}`);
+  const map = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const set = map.get(row.version) ?? new Set<string>();
+    if (row.slug) set.add(row.slug);
+    map.set(row.version, set);
+  }
+  return map;
+}
+
 async function load(): Promise<Snapshot> {
-  const [pages, languages, authors] = await Promise.all([publishedPages(), languageCodes(), authorNames()]);
-  return { pages, languages, authors, at: Date.now() };
+  const [pages, languages, authors, archives] = await Promise.all([publishedPages(), languageCodes(), authorNames(), archivedPages()]);
+  return { pages, languages, authors, archives, at: Date.now() };
 }
 
 async function snapshot(): Promise<Snapshot> {
@@ -95,12 +110,22 @@ async function pageVisibility(slug: string): Promise<string | undefined> {
   return (await publishedPages(slug)).get(slug);
 }
 
-/** /docs/<path>: a published doc page (internal ones only for a signed-in user) or an extra language's hub. */
-export async function docPathExists(path: string, sessionToken: string | undefined): Promise<boolean> {
+/**
+ * /docs/<path>: a published doc page (internal ones only for a signed-in user) or an extra
+ * language's hub; "internal" pages are served with `private, no-store`.
+ */
+export async function docPathAccess(path: string, sessionToken: string | undefined): Promise<"public" | "internal" | "missing"> {
+  // /docs/v/<version>[/<slug>]: an archived version (or its hub).
+  const archived = path.match(/^v\/([^/]+)(?:\/(.+))?$/);
+  if (archived) {
+    const pagesOf = (await snapshot()).archives.get(archived[1]) ?? (await archivedPages(archived[1])).get(archived[1]);
+    if (!pagesOf) return "missing";
+    return !archived[2] || pagesOf.has(archived[2]) ? "public" : "missing";
+  }
   const visibility = await pageVisibility(path);
-  if (visibility === "public") return true;
-  if (visibility === "internal") return validSession(sessionToken);
-  return !path.includes("/") && (await languageHomeExists(path));
+  if (visibility === "public") return "public";
+  if (visibility === "internal") return (await validSession(sessionToken)) ? "internal" : "missing";
+  return !path.includes("/") && (await languageHomeExists(path)) ? "public" : "missing";
 }
 
 /** /<code>: an enabled extra language (its home, or a redirect to its docs hub). */

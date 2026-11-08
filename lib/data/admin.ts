@@ -225,14 +225,30 @@ export type PageQuality = { score: number; issues: string[] };
 export async function pageQuality(ids: string[]): Promise<Map<string, PageQuality>> {
   const result = new Map<string, PageQuality>();
   if (!ids.length) return result;
+  // Scores are kept per working-copy version, so a page is only re-checked after it changes.
+  const memo = (globalThis as { docskuQuality?: Map<string, PageQuality> }).docskuQuality ?? new Map<string, PageQuality>();
+  (globalThis as { docskuQuality?: Map<string, PageQuality> }).docskuQuality = memo;
+  const versions = await db.select({ id: schema.pages.id, version: schema.pages.draftVersion, updatedAt: schema.pages.updatedAt }).from(schema.pages).where(inArray(schema.pages.id, ids));
+  const keyOf = (row: { id: string; version: number; updatedAt: Date }) => `${row.id}:${row.version}:${row.updatedAt.getTime()}`;
+  const missing: string[] = [];
+  for (const row of versions) {
+    const known = memo.get(keyOf(row));
+    if (known) result.set(row.id, known);
+    else missing.push(row.id);
+  }
+  if (!missing.length) return result;
   const { checkQuality, jsonNode, qualityScore } = await import("@/components/admin/editor/quality");
   const rows = await db
-    .select({ id: schema.pages.id, title: schema.pages.draftTitle, description: schema.pages.draftDescription, seo: schema.pages.draftSeo, content: schema.pages.draftContent })
+    .select({ id: schema.pages.id, version: schema.pages.draftVersion, updatedAt: schema.pages.updatedAt, title: schema.pages.draftTitle, description: schema.pages.draftDescription, seo: schema.pages.draftSeo, content: schema.pages.draftContent })
     .from(schema.pages)
-    .where(inArray(schema.pages.id, ids));
+    .where(inArray(schema.pages.id, missing));
   for (const row of rows) {
     const report = checkQuality({ title: row.title, description: row.description, seoTitle: row.seo?.title, seoDescription: row.seo?.description, doc: jsonNode(row.content) });
-    result.set(row.id, { score: qualityScore(report), issues: report.issues.filter((issue) => issue.level !== "info").map((issue) => issue.message) });
+    const quality = { score: qualityScore(report), issues: report.issues.filter((issue) => issue.level !== "info").map((issue) => issue.message) };
+    result.set(row.id, quality);
+    memo.set(keyOf(row), quality);
   }
+  // Old versions are never asked for again: keep the memo from growing without bound.
+  if (memo.size > 5000) for (const key of [...memo.keys()].slice(0, memo.size - 4000)) memo.delete(key);
   return result;
 }

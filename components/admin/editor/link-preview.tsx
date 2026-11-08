@@ -82,6 +82,13 @@ export function LinkInfoLine({ href, delay = 0 }: { href: string; delay?: number
           Halaman ini tidak ada.
         </span>
       );
+    case "restricted":
+      return (
+        <span data-testid="link-info" className="flex items-center gap-1.5 text-[11px] text-fg-muted">
+          <Lock className="size-3 shrink-0" />
+          Halaman yang belum bisa dibuka pembaca
+        </span>
+      );
     case "external":
       return (
         <span data-testid="link-info" className="flex items-center gap-1.5 text-[11px] text-fg-muted">

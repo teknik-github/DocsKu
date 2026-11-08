@@ -97,43 +97,68 @@ const allowedTypos = (term: string) => (term.length >= 8 ? 2 : term.length >= 4 
 
 type Match = { score: number; via?: string; distance?: number };
 
-/** How a query word matches a set of words: 3 exact/prefix, 2 synonym, 1 typo (with the word it matched), 0 none. */
-function matchTerm(term: string, tokens: string[]): Match {
-  if (tokens.some((token) => token.startsWith(term))) return { score: 3 };
-  const synonyms = synonymsOf(term);
-  if (synonyms.some((synonym) => tokens.some((token) => token.startsWith(synonym)))) return { score: 2 };
+/** How one query word matches one index word: 3 prefix, 2 synonym, 1 typo (with its distance), or null. */
+function wordMatch(term: string, synonyms: string[], token: string): Match | null {
+  if (token.startsWith(term)) return { score: 3 };
+  if (synonyms.some((synonym) => token.startsWith(synonym))) return { score: 2 };
   const max = allowedTypos(term);
-  if (max === 0) return { score: 0 };
+  if (max === 0) return null;
+  // The whole word first; its start too, so a typo in a prefix ("instl" ~ "instalasi") counts.
+  const whole = distance(term, token, max);
+  const start = token.length > term.length + max ? distance(term, token.slice(0, term.length), max) : max + 1;
+  const d = Math.min(whole, start);
+  if (d > max) return null;
+  // Suggest the word itself when it is close; a long word matched by its start is a weaker suggestion.
+  return { score: 1, via: token, distance: whole <= max ? whole : d + 0.5 };
+}
+
+/**
+ * Each query word against every distinct word of the index, once per search;
+ * entries then only look their words up. Keeps typing fast on large sites.
+ */
+type Table = Map<string, Match>;
+
+function tableFor(term: string, vocabulary: string[]): Table {
+  const synonyms = synonymsOf(term);
+  const table: Table = new Map();
+  for (const token of vocabulary) {
+    const match = wordMatch(term, synonyms, token);
+    if (match) table.set(token, match);
+  }
+  return table;
+}
+
+const better = (a: Match, b: Match) =>
+  a.score !== b.score ? a.score > b.score : (a.distance ?? 9) !== (b.distance ?? 9) ? (a.distance ?? 9) < (b.distance ?? 9) : (a.via?.length ?? 99) < (b.via?.length ?? 99);
+
+/** How a query word matches a set of words: the best of its words (3 prefix, 2 synonym, 1 typo, 0 none). */
+function matchTerm(table: Table, tokens: string[]): Match {
   let best: Match = { score: 0 };
   for (const token of tokens) {
-    // The whole word first; its start too, so a typo in a prefix ("instl" ~ "instalasi") counts.
-    const whole = distance(term, token, max);
-    const start = token.length > term.length + max ? distance(term, token.slice(0, term.length), max) : max + 1;
-    const d = Math.min(whole, start);
-    if (d > max) continue;
-    // Suggest the word itself when it is close; a long word matched by its start is a weaker suggestion.
-    const rank = whole <= max ? whole : d + 0.5;
-    if (best.distance === undefined || rank < best.distance || (rank === best.distance && token.length < (best.via?.length ?? Infinity))) {
-      best = { score: 1, via: token, distance: rank };
-    }
+    const match = table.get(token);
+    if (match && (best.score === 0 || better(match, best))) best = match;
+    if (best.score === 3) break;
   }
   return best;
 }
 
 type Indexed = { entry: SearchEntry; title: string[]; body: string[]; headings: { text: string; id: string; tokens: string[] }[] };
+type Prepared = { items: Indexed[]; vocabulary: string[] };
 
-const cache = new WeakMap<SearchEntry[], Indexed[]>();
+const cache = new WeakMap<SearchEntry[], Prepared>();
 
-function prepare(index: SearchEntry[]): Indexed[] {
+function prepare(index: SearchEntry[]): Prepared {
   let prepared = cache.get(index);
   if (!prepared) {
-    prepared = index.map((entry) => ({
+    const items = index.map((entry) => ({
       entry,
       title: words(entry.title),
       // A page also matches by its headings' words ("docker linux" → the Docker page with "Instalasi di Linux").
       body: words(`${entry.section} ${entry.tab} ${entry.description} ${entry.headings.map((heading) => heading.text).join(" ")}`),
       headings: entry.headings.map((heading) => ({ ...heading, tokens: words(heading.text) })),
     }));
+    const vocabulary = [...new Set(items.flatMap((item) => [...item.title, ...item.body]))];
+    prepared = { items, vocabulary };
     cache.set(index, prepared);
   }
   return prepared;
@@ -142,19 +167,19 @@ function prepare(index: SearchEntry[]): Indexed[] {
 type Typos = Map<string, Match>;
 
 /** Every query word must match; the weakest match decides how the result ranks. */
-function matchAll(terms: string[], tokens: string[], typos: Typos): number {
+function matchAll(terms: string[], tables: Table[], tokens: string[], typos: Typos): number {
   let weakest = 3;
   const found: [string, Match][] = [];
-  for (const term of terms) {
-    const match = matchTerm(term, tokens);
+  for (let i = 0; i < terms.length; i++) {
+    const match = matchTerm(tables[i], tokens);
     if (match.score === 0) return 0;
-    if (match.score === 1) found.push([term, match]);
+    if (match.score === 1) found.push([terms[i], match]);
     weakest = Math.min(weakest, match.score);
   }
   // Only spellings from results that matched every word feed "Mungkin maksud Anda"; the closest word wins.
   for (const [term, match] of found) {
     const known = typos.get(term);
-    if (!known || (match.distance ?? 9) < (known.distance ?? 9) || ((match.distance ?? 9) === (known.distance ?? 9) && (match.via?.length ?? 99) < (known.via?.length ?? 99))) typos.set(term, match);
+    if (!known || better(match, known)) typos.set(term, match);
   }
   return weakest;
 }
@@ -168,11 +193,13 @@ export function searchIndex(index: SearchEntry[], query: string, limit = 20): Se
     };
   }
   const typos: Typos = new Map();
+  const { items, vocabulary } = prepare(index);
+  const tables = terms.map((term) => tableFor(term, vocabulary));
   const scored: (SearchResult & { score: number })[] = [];
   let exact = false;
-  for (const item of prepare(index)) {
-    const inTitle = matchAll(terms, item.title, typos);
-    const inPage = inTitle ? inTitle : matchAll(terms, [...item.title, ...item.body], typos);
+  for (const item of items) {
+    const inTitle = matchAll(terms, tables, item.title, typos);
+    const inPage = inTitle ? inTitle : matchAll(terms, tables, [...item.title, ...item.body], typos);
     if (inPage) {
       // Title matches rank above description/section matches; typos rank last.
       scored.push({
@@ -186,7 +213,7 @@ export function searchIndex(index: SearchEntry[], query: string, limit = 20): Se
       if (inPage > 1) exact = true;
     }
     for (const heading of item.headings) {
-      const inHeading = matchAll(terms, heading.tokens, typos);
+      const inHeading = matchAll(terms, tables, heading.tokens, typos);
       if (!inHeading) continue;
       scored.push({
         href: `${item.entry.href}#${heading.id}`,

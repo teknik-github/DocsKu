@@ -1,7 +1,7 @@
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 import { countHit, findRedirect, normalisePath } from "@/lib/redirects";
 import { widgetEnabled, widgetFrameSources } from "@/lib/widget-frame";
-import { PROXY_SESSION_COOKIE, authorExists, docPathExists, languageHomeExists, widgetArticleExists } from "@/lib/route-exists";
+import { PROXY_SESSION_COOKIE, authorExists, docPathAccess, languageHomeExists, widgetArticleExists } from "@/lib/route-exists";
 
 /** First path segments owned by other routes; anything else with one segment may be a language home (/<code>). */
 const TOP_LEVEL = new Set(["admin", "api", "docs", "internal", "penulis", "preview", "cover", "media", "widget", "terbaru", "glosarium", "_next"]);
@@ -66,7 +66,18 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
     // The page looks slugs up exactly as written (params), so check the same string.
     const slug = safeDecode(pathname).replace(/^\/docs\//, "").replace(/\/+$/, "");
     const token = request.cookies.get(PROXY_SESSION_COOKIE)?.value;
-    return (await exists(() => docPathExists(slug, token))) ? NextResponse.next() : notFoundResponse(request);
+    let access: "public" | "internal" | "missing";
+    try {
+      access = await docPathAccess(slug, token);
+    } catch {
+      access = "public"; // A database error lets the request through (the page still decides).
+    }
+    if (access === "missing") return notFoundResponse(request);
+    if (access === "public") return NextResponse.next();
+    // Internal articles must never be kept by browsers, proxies or the offline cache (sw.js skips no-store).
+    const response = NextResponse.next();
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
   }
   event.waitUntil(countHit(target.id).catch(() => {}));
   if (/^https?:\/\//i.test(target.url)) return NextResponse.redirect(target.url, 308);

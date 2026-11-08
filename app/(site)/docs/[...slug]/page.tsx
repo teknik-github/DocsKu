@@ -28,6 +28,7 @@ import { getCurrentUser } from "@/lib/auth/dal";
 import { InternalBanner } from "@/components/internal-banner";
 import { getAuthor } from "@/lib/data/authors";
 import { AuthorBox } from "@/components/author";
+import { ArchivedDoc, archiveTarget } from "@/components/archived-doc";
 
 /**
  * The page decides "not found" from `params` before anything streams (a real
@@ -55,6 +56,9 @@ export async function generateMetadata({
   params,
 }: PageProps<"/docs/[...slug]">): Promise<Metadata> {
   const { slug } = await params;
+  // /docs/v/<version>/…: archived versions are never indexed.
+  const archived = await archiveTarget(slug);
+  if (archived) return { title: archived.page ? `${archived.page.title} (${archived.version.label})` : `Dokumentasi ${archived.version.label}`, robots: { index: false, follow: true } };
   const hub = await hubLanguage(slug);
   const [page, automation, alternates, languages] = await Promise.all([
     hub ? null : getPublishedPage(slug.join("/")),
@@ -80,6 +84,16 @@ export default async function DocPage({ params }: PageProps<"/docs/[...slug]">) 
   // article is a 404 for visitors too, the same response as a slug that doesn't exist.
   const { slug } = await params;
   const path = slug.join("/");
+  if (slug[0] === "v" && slug.length >= 2) {
+    // An archived version (or its hub); "v/…" is never a page slug.
+    const archived = await archiveTarget(slug);
+    if (!archived || (slug.length > 2 && !archived.page)) notFound();
+    return (
+      <Suspense fallback={<DocSkeleton />}>
+        <ArchivedDoc slug={slug} />
+      </Suspense>
+    );
+  }
   const [hub, page] = await Promise.all([hubLanguage(slug), getPublishedPage(path)]);
   if (!hub && !page) {
     // Both lookups for every miss, so an internal slug and an unknown one do the same work.

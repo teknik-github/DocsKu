@@ -15,7 +15,8 @@ const pill =
 export function PdfButton() {
   const pathname = usePathname();
   const { site, locale } = useSite();
-  if (site.pdfDownloads === false || !pathname.startsWith("/docs/")) return null;
+  // Archived versions (/docs/v/…) have no PDF.
+  if (site.pdfDownloads === false || !pathname.startsWith("/docs/") || pathname.startsWith("/docs/v/")) return null;
   return (
     <a href={`/pdf${pathname}`} download className={pill} rel="nofollow">
       <FileDown className="size-3.5" />

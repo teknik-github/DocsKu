@@ -1,0 +1,46 @@
+---
+title: Menerbitkan dan versi
+description: Terbitkan sekarang atau terjadwal, ajukan untuk ditinjau, biarkan otomatisasi melengkapi metadata, dan arsipkan versi dokumentasi.
+slug: panduan-docsku/menerbitkan
+group: Panduan Docsku
+category: Menulis
+---
+
+Setiap halaman punya dua salinan: versi **tayang** yang dibaca pengunjung dan **salinan kerja** yang Anda edit. Menerbitkan menyalin salinan kerja ke versi tayang, jadi Anda bebas menyunting halaman yang sudah terbit tanpa mengubah situs sampai siap.
+
+## Terbitkan atau jadwalkan
+
+Tombol **Terbitkan** di editor menawarkan:
+
+- **Terbitkan sekarang**: langsung tayang.
+- **Jadwalkan**: pilih tanggal dan jam (WIB); penjadwal menerbitkannya otomatis.
+- **Perbarui**: untuk halaman yang sudah terbit dan punya perubahan.
+- **Tarik dari situs** atau **Buang perubahan**.
+
+## Otomatisasi saat terbit
+
+Jika AI aktif, Docsku bisa mengisi deskripsi yang kosong, meta title dan meta description, mengganti alamat sementara dengan slug dari judul, dan memilih kategori. Banner **Otomatis:** di editor menunjukkan apa yang diisi.
+
+## Alur persetujuan
+
+Pengguna dengan peran **Kontributor** tidak bisa menerbitkan. Mereka menekan **Ajukan untuk ditinjau**; editor atau admin lalu memilih **Setujui & terbitkan** atau **Minta perubahan** dengan catatan. Semua pihak mendapat email bila email diaktifkan.
+
+## Tinjauan berkala
+
+Halaman yang sudah lama tidak diperbarui muncul di **Tinjauan** (default 180 hari). Setiap Senin Docsku juga memeriksa tautan luar dan mengirim daftar tautan rusak ke pemilik halaman.
+
+## Versi dokumentasi
+
+Sebelum mengubah dokumentasi besar-besaran untuk rilis produk baru, arsipkan dulu yang sekarang:
+
+<Steps>
+<Step title="Beri nama versi saat ini">
+Di **Versi**, isi nama dokumentasi yang tayang, misalnya `v2`.
+</Step>
+<Step title="Arsipkan">
+Isi nama versi lama (mis. `v1`) dan alamatnya (mis. `1.0`), lalu klik **Arsipkan sekarang**. Semua halaman publik dan navigasinya disalin ke `/docs/v/1.0`.
+</Step>
+<Step title="Lanjutkan menulis">
+Ubah dokumentasi seperti biasa. Pembaca bisa memilih versi lama lewat pemilih versi di header; versi lama diberi banner dan tidak diindeks mesin pencari.
+</Step>
+</Steps>

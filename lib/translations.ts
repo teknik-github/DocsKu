@@ -42,6 +42,7 @@ export async function slugLanguageError(pageId: string | null, slug: string): Pr
   if (page?.translationOf) {
     return slug.startsWith(`${page.locale}/`) && slug.length > page.locale.length + 1 ? null : `Slug terjemahan harus diawali “${page.locale}/”.`;
   }
+  if (first === "v") return "Awalan “v/” dipakai untuk versi dokumentasi lama. Pilih slug lain.";
   return languages.languages.some((language) => language.code === first)
     ? `Awalan “${first}/” dipakai bahasa ${languages.languages.find((l) => l.code === first)?.label}. Pilih slug lain.`
     : null;

@@ -68,6 +68,9 @@ const TEXT: Record<string, (m: Meta) => ActivityText> = {
   "note.create": () => ({ verb: "menulis catatan internal di" }),
   "note.resolve": () => ({ verb: "menyelesaikan catatan internal di", tone: "good" }),
   "note.delete": () => ({ verb: "menghapus catatan internal di", tone: "danger" }),
+  "version.create": (m) => ({ verb: "mengarsipkan dokumentasi sebagai versi", after: m.pages ? ` (${num(m.pages)} halaman)` : "" }),
+  "version.delete": () => ({ verb: "menghapus versi dokumentasi", tone: "danger" }),
+  "version.label": (m) => ({ verb: `menamai versi saat ini “${str(m.label)}”`, noTarget: true }),
   "links.check": (m) => ({ verb: m.auto ? "memeriksa tautan (mingguan otomatis)" : "memeriksa tautan luar", after: ` (${num(m.checked)} dicek, ${num(m.broken)} rusak)`, noTarget: true }),
 
   "category.create": () => ({ verb: "membuat kategori" }),

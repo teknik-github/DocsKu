@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth/dal";
 import { isAiReady } from "@/lib/ai/config";
 import { AiChat } from "@/components/admin/ai-chat";
 import { searchAdvicePrompt } from "@/lib/ai/insights";
+import { can } from "@/lib/auth/permissions";
 
 export const metadata = { title: "AI Chat" };
 
@@ -19,10 +20,11 @@ export default function AiChatPage({ searchParams }: PageProps<"/admin/ai">) {
  * `?saran=klik&q=…` (a search with results nobody opened) a request to improve those pages' titles.
  */
 async function Chat({ searchParams }: Pick<PageProps<"/admin/ai">, "searchParams">) {
-  await requireUser();
+  const user = await requireUser();
   const [enabled, params] = await Promise.all([isAiReady(), searchParams]);
   const topic = typeof params.tulis === "string" ? params.tulis.replace(/\s+/g, " ").trim().slice(0, 120) : "";
-  const advice = params.saran === "klik" && typeof params.q === "string" ? await searchAdvicePrompt(params.q) : null;
+  // Built from search statistics: only for people who may see them.
+  const advice = params.saran === "klik" && typeof params.q === "string" && can(user, "stats.view") ? await searchAdvicePrompt(params.q) : null;
   const initial =
     advice ??
     (topic

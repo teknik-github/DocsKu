@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BookA,
+  GitBranch,
   CalendarCheck,
   ChartColumn,
   ExternalLink,
@@ -109,6 +110,7 @@ const GROUPS: Group[] = [
     items: [
       { href: "/admin/theme", label: "Tema", icon: Palette },
       { href: "/admin/navigation", label: "Navigasi", icon: ListTree },
+      { href: "/admin/versions", label: "Versi", icon: GitBranch },
       { href: "/admin/redirects", label: "Redirect", icon: Signpost },
       { href: "/admin/users", label: "Pengguna", icon: Users },
       { href: "/admin/activity", label: "Aktivitas", icon: History },
