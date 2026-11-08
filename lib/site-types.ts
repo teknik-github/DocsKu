@@ -145,6 +145,8 @@ export type CommentSettings = {
   enabled: boolean;
   /** New comments from visitors wait for approval in the dashboard (off: shown at once, except ones with links). */
   moderation: boolean;
+  /** Readers can select a passage and mark it as confusing; it becomes an internal note (default on). */
+  sectionFeedback?: boolean;
 };
 
 /** Periodic content review (settings key "review"); pages can override the interval. */
@@ -152,6 +154,8 @@ export type ReviewSettings = {
   enabled: boolean;
   /** Days after the last review (or publish) before a page is due again; 0 = pages without their own interval are never due. */
   defaultIntervalDays: number;
+  /** Check external links every week and email the owners of pages with broken links (default on). */
+  autoLinkCheck?: boolean;
 };
 
 /** "Tanya AI" in the public search box (settings key "ask_ai"). Works only while AI is set up. */

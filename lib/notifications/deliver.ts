@@ -160,7 +160,7 @@ async function sendWebhooks(deadline: number) {
 /* -------------------------------------------------------------- digests -- */
 
 /** Asia/Jakarta calendar parts of `date`. */
-function jakarta(date = new Date()) {
+export function jakarta(date = new Date()) {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23", weekday: "short" })
       .formatToParts(date)
@@ -169,15 +169,15 @@ function jakarta(date = new Date()) {
   return { day: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour), weekday: parts.weekday as string };
 }
 
-type NotifyState = { digestDay?: string; missesDay?: string };
+type NotifyState = { digestDay?: string; missesDay?: string; linksWeek?: string };
 
-async function readState(): Promise<NotifyState> {
+export async function readState(): Promise<NotifyState> {
   const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, "notifications_state"));
   return (row?.value as NotifyState | undefined) ?? {};
 }
 
 /** Claims a run for this day (returns false when another tick already did). */
-async function claim(field: keyof NotifyState, day: string): Promise<boolean> {
+export async function claim(field: keyof NotifyState, day: string): Promise<boolean> {
   const rows = await db.execute<{ key: string }>(sql`
     insert into settings (key, value) values ('notifications_state', ${JSON.stringify({ [field]: day })}::jsonb)
     on conflict (key) do update set value = settings.value || excluded.value, updated_at = now()

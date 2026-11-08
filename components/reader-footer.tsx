@@ -5,6 +5,7 @@ import { useSite } from "@/components/site-context";
 import { t } from "@/lib/i18n";
 import { Check, ThumbsDown, ThumbsUp } from "lucide-react";
 import { PageComments } from "@/components/page-comments";
+import { SectionFeedback } from "@/components/section-feedback";
 
 /** Fire-and-forget POST to a public stats endpoint. */
 export function beacon(url: string, body: unknown) {
@@ -29,7 +30,7 @@ const subscribe = (onChange: () => void) => {
  * (no cookies) and asks whether the page helped, with an optional message
  * that only the dashboard shows, followed by the public comments.
  */
-export function ReaderFooter({ slug }: { slug: string }) {
+export function ReaderFooter({ slug, sectionFeedback = false }: { slug: string; sectionFeedback?: boolean }) {
   // Placed where the article body ends: how far the reader scrolled is measured against it.
   const end = useRef<HTMLDivElement>(null);
   useReadingTracker(slug, end);
@@ -44,6 +45,7 @@ export function ReaderFooter({ slug }: { slug: string }) {
   return (
     <>
       <div ref={end} aria-hidden="true" />
+      {sectionFeedback && <SectionFeedback key={`section:${slug}`} slug={slug} />}
       <PageFeedback key={slug} slug={slug} />
       <PageComments key={`comments:${slug}`} slug={slug} />
     </>

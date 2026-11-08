@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import {
   generatedCover,
   getAutomation,
+  getCommentSettings,
   getGlossary,
   getLanguageSettings,
   getNavigation,
@@ -99,12 +100,13 @@ async function DocContent({ params }: Pick<PageProps<"/docs/[...slug]">, "params
   // /docs/<code>/… belongs to that language: its navigation, cards and chrome.
   const languages = await getLanguageSettings();
   const locale = localeFromSlug(slug.join("/"), languages);
-  const [found, tabs, site, automation, glossary] = await Promise.all([
+  const [found, tabs, site, automation, glossary, comments] = await Promise.all([
     getPublishedPage(slug.join("/")),
     getNavigation(locale),
     getSiteSettings(),
     getAutomation(),
     getGlossary(),
+    getCommentSettings(),
   ]);
   // Not public: an internal article, for signed-in team members only (session checked on the server).
   const internal = found ? null : await getInternalPage(slug.join("/"));
@@ -120,7 +122,7 @@ async function DocContent({ params }: Pick<PageProps<"/docs/[...slug]">, "params
   const footer = (
     <>
       <AuthorBox author={author} />
-      {!internal && <ReaderFooter slug={page.slug} />}
+      {!internal && <ReaderFooter slug={page.slug} sectionFeedback={comments.sectionFeedback !== false} />}
     </>
   );
   const banner = internal ? <InternalBanner /> : undefined;

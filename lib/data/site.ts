@@ -75,7 +75,7 @@ export async function getAutomation(): Promise<AutomationSettings> {
   return { ...DEFAULT_AUTOMATION, ...(await readSetting<Partial<AutomationSettings>>("automation")) };
 }
 
-export const DEFAULT_COMMENTS: CommentSettings = { enabled: true, moderation: false };
+export const DEFAULT_COMMENTS: CommentSettings = { enabled: true, moderation: false, sectionFeedback: true };
 
 /** Whether docs pages show comments, and whether new ones wait for approval (settings key "comments"). */
 export async function getCommentSettings(): Promise<CommentSettings> {

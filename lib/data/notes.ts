@@ -18,7 +18,7 @@ export async function listOpenNotesFor(userId: string, limit = 5): Promise<{ not
   const [rows, [total]] = await Promise.all([
     db.execute<OpenNote>(sql`
       select n.id, n.page_id as "pageId", coalesce(nullif(p.draft_title, ''), 'Tanpa judul') as "pageTitle", n.body, n.quote,
-        coalesce(u.name, 'Pengguna terhapus') as author,
+        case when n.source = 'reader' then 'Pembaca' else coalesce(u.name, 'Pengguna terhapus') end as author,
         to_char(greatest(n.created_at, coalesce((select max(r.created_at) from page_notes r where r.parent_id = n.id), n.created_at)) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as "createdAt",
         (select count(*)::int from page_notes r where r.parent_id = n.id) as replies
       from page_notes n join pages p on p.id = n.page_id left join users u on u.id = n.author_id

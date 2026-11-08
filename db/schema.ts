@@ -503,6 +503,8 @@ export const pageNotes = pgTable(
       .references(() => pages.id, { onDelete: "cascade" }),
     parentId: uuid("parent_id").references((): AnyPgColumn => pageNotes.id, { onDelete: "cascade" }),
     authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
+    /** "team" (written in the editor) or "reader" (a visitor marked the quoted text as confusing). */
+    source: text("source").notNull().default("team"),
     quote: text("quote").notNull().default(""),
     body: text("body").notNull(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),

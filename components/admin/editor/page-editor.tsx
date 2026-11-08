@@ -56,6 +56,7 @@ import { approvePage, requestChanges, submitForApproval, withdrawSubmission } fr
 import { confirmDialog, promptDialog } from "@/components/admin/dialog";
 import type { ApprovalInfo } from "@/lib/collab/approval";
 import { NoteHighlights } from "@/components/admin/editor/note-highlights";
+import { LinkPreviewMenu } from "@/components/admin/editor/link-preview";
 import { ReviewPanel, usePageNotes, type ReviewTab } from "@/components/admin/editor/review-panel";
 import { checkQuality } from "@/components/admin/editor/quality";
 
@@ -931,6 +932,7 @@ export function PageEditor({
                 }
               />
               <TableBubbleMenu editor={editor} />
+              <LinkPreviewMenu editor={editor} />
               <ImageBubbleMenu editor={editor} />
               <BlockInsertMenu editor={editor} />
             </>

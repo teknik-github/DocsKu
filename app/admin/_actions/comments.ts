@@ -92,7 +92,7 @@ export async function postStaffComment(input: { pageId: string; body: string }):
   return { ok: true };
 }
 
-const settingsSchema = z.object({ enabled: z.boolean(), moderation: z.boolean() });
+const settingsSchema = z.object({ enabled: z.boolean(), moderation: z.boolean(), sectionFeedback: z.boolean().default(true) });
 
 /** Pengaturan → Komentar. Admins only. */
 export async function saveCommentSettings(input: CommentSettings): Promise<Result> {

@@ -12,6 +12,7 @@ import {
 import { SearchProvider } from "@/components/search";
 import { SiteProvider } from "@/components/site-context";
 import { SiteHeader } from "@/components/site-header";
+import { PwaRegister } from "@/components/pwa-register";
 
 export default async function SiteLayout({ children }: LayoutProps<"/">) {
   const [site, tabs, searchIndex, askAi, languages, pageAlternates, homes, glossary] = await Promise.all([
@@ -47,6 +48,7 @@ export default async function SiteLayout({ children }: LayoutProps<"/">) {
           <SiteHeader />
         </Suspense>
         <div className="pt-(--header-h)">{children}</div>
+        <PwaRegister />
       </SearchProvider>
     </SiteProvider>
   );

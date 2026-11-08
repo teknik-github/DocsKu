@@ -22,6 +22,8 @@ export type NoteView = {
   quote: string;
   body: string;
   authorId: string | null;
+  /** "team", or "reader" for a passage a visitor marked as confusing. */
+  source: string;
   authorName: string;
   authorAvatar: string | null;
   createdAt: string;
@@ -53,6 +55,7 @@ export async function listNotes(pageId: string): Promise<Result<{ notes: NoteVie
       quote: schema.pageNotes.quote,
       body: schema.pageNotes.body,
       authorId: schema.pageNotes.authorId,
+      source: schema.pageNotes.source,
       authorName: schema.users.name,
       authorAvatar: schema.users.avatar,
       createdAt: schema.pageNotes.createdAt,
@@ -77,7 +80,8 @@ export async function listNotes(pageId: string): Promise<Result<{ notes: NoteVie
       quote: row.quote,
       body: row.body,
       authorId: row.authorId,
-      authorName: row.authorName ?? "Pengguna terhapus",
+      source: row.source,
+      authorName: row.source === "reader" ? "Pembaca" : (row.authorName ?? "Pengguna terhapus"),
       authorAvatar: row.authorAvatar ?? null,
       createdAt: row.createdAt.toISOString(),
       resolvedAt: row.resolvedAt?.toISOString() ?? null,

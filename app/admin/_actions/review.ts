@@ -110,7 +110,7 @@ export async function markReviewed(pageIds: string[]): Promise<Result & { review
   return { ok: true, reviewedAt: updated[0].reviewedAt?.toISOString() };
 }
 
-const settingsSchema = z.object({ enabled: z.boolean(), defaultIntervalDays: z.number().int().min(0).max(3650) });
+const settingsSchema = z.object({ enabled: z.boolean(), defaultIntervalDays: z.number().int().min(0).max(3650), autoLinkCheck: z.boolean().default(true) });
 
 /** Pengaturan → Tinjauan konten. Admins only. */
 export async function saveReviewSettings(input: ReviewSettings): Promise<Result> {

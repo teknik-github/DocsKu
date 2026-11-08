@@ -1,4 +1,5 @@
 import { revalidateTag } from "next/cache";
+import { after } from "next/server";
 import { and, eq, lte, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { addToNavigation, readAutomation } from "@/lib/automation";
@@ -8,6 +9,7 @@ import { forgetRouteExistence } from "@/lib/route-exists";
 import { logActivity, pruneActivity } from "@/lib/activity";
 import { notify } from "@/lib/notify";
 import { runNotifications } from "@/lib/notifications/deliver";
+import { runWeeklyLinkCheck } from "@/lib/link-schedule";
 
 /**
  * Publishes scheduled pages whose time has come. Called every minute by
@@ -81,5 +83,7 @@ export async function POST(request: Request) {
   if (navigationChanged) revalidateTag("navigation", { expire: 0 });
   // Emails and webhooks queued by notify() go out here, within a time budget.
   const notifications = await runNotifications();
+  // The weekly link check can take minutes: it runs after this response.
+  after(() => runWeeklyLinkCheck(new URL(request.url).searchParams.get("periksa-tautan") === "1"));
   return Response.json({ published: published.length, notifications });
 }

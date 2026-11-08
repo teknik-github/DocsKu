@@ -6,6 +6,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import { BubbleMenu, FloatingMenu } from "@tiptap/react/menus";
 import { useEditorState } from "@tiptap/react";
 import { AI_ACTIONS, type AiActionId } from "@/lib/ai/presets";
+import { LinkInfoLine } from "@/components/admin/editor/link-preview";
 import {
   Bold,
   Code,
@@ -129,6 +130,11 @@ export function TextBubbleMenu({ editor, onAi, onNote }: { editor: Editor; onAi?
           <button type="submit" className="h-7 rounded-md bg-fg px-2 text-xs text-page">
             Simpan
           </button>
+          {href.trim() && (
+            <span className="ml-1 max-w-64 min-w-0">
+              <LinkInfoLine href={href} delay={350} />
+            </span>
+          )}
         </form>
       ) : (
         <>

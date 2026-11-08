@@ -1,0 +1,1 @@
+ALTER TABLE "page_notes" ADD COLUMN "source" text DEFAULT 'team' NOT NULL;

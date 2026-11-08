@@ -131,6 +131,7 @@ export function eventEmail(event: NotifyEvent, siteName: string, origin: string)
         action: { label: "Buka catatan", url: abs(`/admin/pages/${event.pageId}?catatan=${event.noteId}`) },
       });
     case "search.misses":
+    case "links.broken":
       return null;
   }
 }
@@ -161,6 +162,15 @@ export function eventSummary(event: NotifyEvent): { title: string; text: string;
         title: `${event.reply ? "Balasan catatan" : "Catatan tim"}: ${event.pageTitle}`,
         text: `${event.by}: ${event.excerpt}`,
         url: `/admin/pages/${event.pageId}?catatan=${event.noteId}`,
+      };
+    case "links.broken":
+      return {
+        title: `Tautan rusak: ${event.total} di ${event.pages.length} halaman`,
+        text: event.pages
+          .slice(0, 10)
+          .map((page) => `• ${page.title} — ${page.count}`)
+          .join("\n"),
+        url: "/admin/review?tab=tautan",
       };
     case "search.misses":
       return {

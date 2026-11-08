@@ -236,6 +236,12 @@ const id = {
   glossaryIntro: "Istilah yang sering dipakai di dokumentasi ini, beserta artinya.",
   allCategories: "Semua",
   didYouMean: "Mungkin maksud Anda “{q}”",
+  sectionConfusing: "Bagian ini membingungkan?",
+  sectionWhat: "Apa yang membingungkan? (opsional)",
+  sectionSend: "Kirim ke tim",
+  sectionCancel: "Batal",
+  sectionThanks: "Terima kasih! Tim kami akan memperjelas bagian ini.",
+  sectionError: "Gagal mengirim. Coba lagi nanti.",
 } as const;
 
 export type I18nKey = keyof typeof id;
@@ -402,6 +408,12 @@ const en: Record<I18nKey, string> = {
   glossaryIntro: "Terms used throughout this documentation, and what they mean.",
   allCategories: "All",
   didYouMean: "Did you mean “{q}”",
+  sectionConfusing: "Is this part confusing?",
+  sectionWhat: "What is confusing? (optional)",
+  sectionSend: "Send to the team",
+  sectionCancel: "Cancel",
+  sectionThanks: "Thank you! We'll make this part clearer.",
+  sectionError: "Couldn't send it. Please try again later.",
 };
 
 const DICTIONARIES: Record<string, Record<I18nKey, string>> = { id, en };

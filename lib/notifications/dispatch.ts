@@ -94,6 +94,7 @@ async function emailRecipients(event: NotifyEvent, people: Recipient[]): Promise
       personal("note.new", [...(await pagePeople(event.pageId)), ...event.participants]);
       return { key: "note.new", ids };
     case "search.misses":
+    case "links.broken":
       return null;
   }
 }

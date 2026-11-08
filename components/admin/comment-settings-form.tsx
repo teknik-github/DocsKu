@@ -28,6 +28,12 @@ export function CommentSettingsForm({ initial }: { initial: CommentSettings }) {
       description:
         "Komentar baru menunggu persetujuan di menu Komentar sebelum tampil. Jika mati, komentar langsung tampil; komentar berisi tautan tetap ditinjau dulu, dan komentar yang tidak pantas bisa disembunyikan, ditandai spam, atau dihapus.",
     },
+    {
+      key: "sectionFeedback",
+      label: "Pembaca bisa menandai bagian",
+      description:
+        "Pembaca memilih teks di artikel lalu menandainya membingungkan (boleh dengan pesan). Tandanya masuk sebagai catatan tim di editor halaman itu, tidak pernah tampil di situs.",
+    },
   ];
 
   return (
@@ -44,7 +50,7 @@ export function CommentSettingsForm({ initial }: { initial: CommentSettings }) {
           <label key={option.key} className={`flex items-start gap-2 text-sm ${option.key === "moderation" && !form.enabled ? "opacity-50" : ""}`}>
             <input
               type="checkbox"
-              checked={form[option.key]}
+              checked={form[option.key] !== false}
               disabled={option.key === "moderation" && !form.enabled}
               onChange={(e) => setForm({ ...form, [option.key]: e.target.checked })}
               className="mt-0.5 accent-accent"

@@ -4,7 +4,7 @@
  */
 import type { Role } from "@/db/schema";
 
-export type EmailEventKey = "comment.new" | "feedback.new" | "page.submitted" | "page.approved" | "page.changes_requested" | "page.published" | "note.new" | "digest.weekly";
+export type EmailEventKey = "comment.new" | "feedback.new" | "page.submitted" | "page.approved" | "page.changes_requested" | "page.published" | "note.new" | "links.broken" | "digest.weekly";
 
 export type EmailEventInfo = {
   key: EmailEventKey;
@@ -67,6 +67,14 @@ export const EMAIL_EVENTS: EmailEventInfo[] = [
     defaultOn: true,
   },
   {
+    key: "links.broken",
+    label: "Tautan rusak di halaman saya",
+    description: "Hasil pemeriksaan tautan mingguan (Senin): tautan rusak di halaman yang Anda pegang atau tulis. Admin menerima ringkasan semua halaman.",
+    roles: ["admin"],
+    visibleTo: ["admin", "editor", "contributor"],
+    defaultOn: true,
+  },
+  {
     key: "page.published",
     label: "Halaman baru terbit",
     description: "Setiap kali halaman terbit untuk pertama kali (termasuk yang terjadwal).",
@@ -98,7 +106,7 @@ export const WEBHOOK_KINDS: { id: WebhookKind; label: string; hint: string }[] =
   { id: "custom", label: "URL sendiri", hint: "POST JSON ke URL https Anda, ditandatangani HMAC-SHA256." },
 ];
 
-export type WebhookEventKey = "page.published" | "page.submitted" | "page.approved" | "comment.new" | "feedback.new" | "note.new" | "search.misses";
+export type WebhookEventKey = "page.published" | "page.submitted" | "page.approved" | "comment.new" | "feedback.new" | "note.new" | "links.broken" | "search.misses";
 export const WEBHOOK_EVENTS: { key: WebhookEventKey; label: string }[] = [
   { key: "page.published", label: "Halaman terbit" },
   { key: "page.submitted", label: "Halaman diajukan" },
@@ -106,6 +114,7 @@ export const WEBHOOK_EVENTS: { key: WebhookEventKey; label: string }[] = [
   { key: "comment.new", label: "Komentar baru" },
   { key: "feedback.new", label: "Pesan pembaca" },
   { key: "note.new", label: "Catatan tim (internal)" },
+  { key: "links.broken", label: "Tautan rusak (pemeriksaan mingguan)" },
   { key: "search.misses", label: "Pencarian tanpa hasil (ringkasan harian)" },
 ];
 export const WEBHOOK_EVENT_KEYS = WEBHOOK_EVENTS.map((e) => e.key) as [WebhookEventKey, ...WebhookEventKey[]];

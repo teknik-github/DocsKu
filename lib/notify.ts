@@ -22,6 +22,8 @@ export type NotifyEvent = Actor &
     | { type: "comment.new"; commentId: string; pageTitle: string; href: string; author: string; excerpt: string; pending: boolean }
     | { type: "feedback.new"; pageTitle: string; href: string; helpful: boolean; message: string; pageId?: string }
     | { type: "search.misses"; day: string; queries: { query: string; misses: number }[] }
+    /** Weekly link check (webhooks; emails are written per person by lib/link-schedule.ts). */
+    | { type: "links.broken"; total: number; pages: { pageId: string; title: string; count: number }[] }
     /** An internal note in the editor, or a reply to one. `participants`: people already in that conversation. */
     | { type: "note.new"; noteId: string; pageId: string; pageTitle: string; by: string; excerpt: string; quote: string; reply: boolean; participants: string[] }
   );

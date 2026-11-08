@@ -477,7 +477,12 @@ function NoteCard({
         <div key={item.id} className={item.parentId ? "mt-2 border-t border-line pt-2" : ""}>
           <div className="flex items-center gap-2">
             <Avatar name={item.authorName} src={item.authorAvatar} size={20} />
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-fg">{item.authorName}</span>
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-fg">
+              {item.authorName}
+              {item.source === "reader" && (
+                <span className="ml-1.5 rounded bg-sky-100 px-1 py-px text-[10px] font-medium text-sky-700 dark:bg-sky-950/50 dark:text-sky-300">dari situs</span>
+              )}
+            </span>
             <time className="shrink-0 text-[11px] text-fg-subtle" dateTime={item.createdAt}>
               {when.format(new Date(item.createdAt))}
             </time>

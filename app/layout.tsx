@@ -1,4 +1,5 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { pwaColors } from "@/lib/pwa";
 import { Geist, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { getSiteSettings } from "@/lib/data/site";
 import { ThemeScript } from "@/components/theme";
@@ -29,9 +30,16 @@ export async function generateMetadata(): Promise<Metadata> {
     title: { default: `${site.name} Docs`, template: `%s · ${site.name} Docs` },
     description: site.description,
     openGraph: { siteName: `${site.name} Docs` },
+    // Installable (app/manifest.ts); iOS uses these instead of the manifest.
+    appleWebApp: { capable: true, title: site.name, statusBarStyle: "default" },
+    icons: { apple: "/pwa-icon/192" },
     // Lets browsers and feed readers find "Apa yang baru" from any page.
     alternates: { types: { "application/rss+xml": [{ url: "/rss.xml", title: `${site.name} Docs` }] } },
   };
+}
+
+export async function generateViewport(): Promise<Viewport> {
+  return { themeColor: pwaColors(await getSiteSettings()).accent };
 }
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {

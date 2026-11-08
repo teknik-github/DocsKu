@@ -66,6 +66,20 @@ export function ReviewSettingsForm({ initial, overdue }: { initial: ReviewSettin
         </Select>
         <p className="text-xs text-fg-subtle">Dihitung dari tinjauan atau penerbitan terakhir.</p>
       </div>
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={form.autoLinkCheck !== false}
+          onChange={(e) => setForm({ ...form, autoLinkCheck: e.target.checked })}
+          className="mt-0.5 accent-accent"
+        />
+        <span>
+          Periksa tautan setiap minggu
+          <span className="block text-xs text-fg-subtle">
+            Setiap Senin dini hari tautan luar dicek ulang, lalu pemilik atau penulis halaman yang tautannya rusak mendapat email (jika email aktif). Hasilnya juga ada di Tinjauan → Tautan rusak.
+          </span>
+        </span>
+      </label>
       {message && <Alert tone={message.tone}>{message.text}</Alert>}
       <Button size="sm" onClick={save} disabled={pending}>
         Simpan

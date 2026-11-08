@@ -15,7 +15,7 @@ import type { ReviewSettings } from "@/lib/site-types";
  * Dashboard only: callers check auth.
  */
 
-export const DEFAULT_REVIEW: ReviewSettings = { enabled: true, defaultIntervalDays: 180 };
+export const DEFAULT_REVIEW: ReviewSettings = { enabled: true, defaultIntervalDays: 180, autoLinkCheck: true };
 /** Intervals offered in the editor; null = site default, 0 = never. */
 export const REVIEW_INTERVALS = [30, 90, 180, 365] as const;
 /** "Segera": due within this many days. */
