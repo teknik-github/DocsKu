@@ -61,6 +61,13 @@ const TEXT: Record<string, (m: Meta) => ActivityText> = {
   "template.create": () => ({ verb: "menyimpan templat" }),
   "template.update": () => ({ verb: "mengubah templat" }),
   "template.delete": () => ({ verb: "menghapus templat", tone: "danger" }),
+  "glossary.create": () => ({ verb: "menambah istilah glosarium" }),
+  "glossary.update": () => ({ verb: "mengubah istilah glosarium" }),
+  "glossary.delete": () => ({ verb: "menghapus istilah glosarium", tone: "danger" }),
+  "glossary.settings": (m) => ({ verb: m.tooltips ? "menyalakan tooltip glosarium" : "mematikan tooltip glosarium", noTarget: true }),
+  "note.create": () => ({ verb: "menulis catatan internal di" }),
+  "note.resolve": () => ({ verb: "menyelesaikan catatan internal di", tone: "good" }),
+  "note.delete": () => ({ verb: "menghapus catatan internal di", tone: "danger" }),
 
   "category.create": () => ({ verb: "membuat kategori" }),
   "category.rename": (m) => ({ verb: "mengganti nama kategori", after: m.from ? ` (sebelumnya ${str(m.from)})` : "" }),

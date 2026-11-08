@@ -9,7 +9,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import { TableKit } from "@tiptap/extension-table";
 import { Placeholder } from "@tiptap/extensions";
-import { ArrowLeft, Eye, ImagePlus, Loader2, MessageSquareText, Settings2, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Eye, ImagePlus, ListChecks, Loader2, MessageSquareText, Settings2, Sparkles, X } from "lucide-react";
 import {
   discardChanges,
   loadLatestDraft,
@@ -53,6 +53,9 @@ import { ApprovalBanner, ConflictBanner, PresenceAvatars, SubmitButton, usePrese
 import { approvePage, requestChanges, submitForApproval, withdrawSubmission } from "@/app/admin/_actions/approval";
 import { confirmDialog, promptDialog } from "@/components/admin/dialog";
 import type { ApprovalInfo } from "@/lib/collab/approval";
+import { NoteHighlights } from "@/components/admin/editor/note-highlights";
+import { ReviewPanel, usePageNotes, type ReviewTab } from "@/components/admin/editor/review-panel";
+import { checkQuality } from "@/components/admin/editor/quality";
 
 export type EditorPage = {
   id: string;
@@ -141,6 +144,20 @@ export function PageEditor({
   const [autoNote, setAutoNote] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  /** "Periksa": writing checks and internal notes. */
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewTab, setReviewTab] = useState<ReviewTab>("quality");
+  /** Text picked with the bubble menu's note button, waiting for its note. */
+  const [draftQuote, setDraftQuote] = useState<string | null>(null);
+  const [activeNote, setActiveNote] = useState<string | null>(null);
+  /** Opens one side panel and closes the others. */
+  function openSide(side: "settings" | "chat" | "review" | null) {
+    setPanelOpen(side === "settings");
+    setChatOpen(side === "chat");
+    setReviewOpen(side === "review");
+  }
+  /** A click on a highlighted quote in the text opens its note (set once the editor exists). */
+  const selectNote = useRef<(id: string) => void>(() => {});
   const [imageDialog, setImageDialog] = useState(false);
   const [aiJob, setAiJob] = useState<AiJob | null>(null);
   const [describing, setDescribing] = useState(false);
@@ -274,6 +291,7 @@ export function PageEditor({
       Accordion,
       Hero,
       BlockHover.configure({ bus: hoverBus }),
+      NoteHighlights.configure({ onSelect: (id) => selectNote.current(id) }),
       SlashCommand.configure({
         requestImage: () => setImageDialog(true),
         requestAi: aiEnabled ? (pos) => setAiJob({ action: "write", from: pos, to: pos }) : undefined,
@@ -309,6 +327,46 @@ export function PageEditor({
     },
     onUpdate: () => markDirty(),
   });
+
+  const notes = usePageNotes(page.id, editor, activeNote);
+  useEffect(() => {
+    selectNote.current = (id) => {
+      setActiveNote(id);
+      setReviewTab("notes");
+      openSide("review");
+    };
+  });
+
+  /**
+   * Publishing with open writing problems (errors and warnings from "Periksa") asks first;
+   * "Periksa dulu" opens the list instead. Notes still open are mentioned too.
+   */
+  async function publishChecked(when: string | null) {
+    const current = editorRef.current;
+    if (current && !isHome) {
+      const problems = checkQuality({ title: titleRef.current, description: descriptionRef.current, seoTitle: seoRef.current.title, seoDescription: seoRef.current.description, doc: current.state.doc }).issues.filter(
+        (issue) => issue.level !== "info",
+      );
+      if (problems.length > 0 || notes.open > 0) {
+        const parts = [
+          problems.length ? `${problems.length} catatan kualitas (misalnya: ${problems[0].message.replace(/\.$/, "")})` : "",
+          notes.open ? `${notes.open} catatan tim yang belum selesai` : "",
+        ].filter(Boolean);
+        const go = await confirmDialog({
+          title: when ? "Jadwalkan meski ada catatan?" : "Terbitkan meski ada catatan?",
+          message: `Halaman ini masih punya ${parts.join(" dan ")}.`,
+          confirmLabel: when ? "Jadwalkan saja" : "Terbitkan saja",
+          cancelLabel: "Periksa dulu",
+        });
+        if (!go) {
+          setReviewTab(problems.length ? "quality" : "notes");
+          openSide("review");
+          return false;
+        }
+      }
+    }
+    return publish(when);
+  }
 
   // Ctrl/Cmd+S saves a revision; leaving with unsaved edits asks first.
   useEffect(() => {
@@ -682,13 +740,25 @@ export function PageEditor({
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
           <PresenceAvatars others={others} />
+          <button
+            type="button"
+            onClick={() => openSide(reviewOpen ? null : "review")}
+            aria-pressed={reviewOpen}
+            title="Periksa kualitas tulisan dan catatan tim"
+            className={`${buttonClass("ghost", "sm")} relative max-sm:hidden ${reviewOpen ? "bg-fill text-fg" : ""}`}
+          >
+            <ListChecks className="size-4" />
+            <span className="hidden sm:inline">Periksa</span>
+            {notes.open > 0 && (
+              <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white tabular-nums" aria-label={`${notes.open} catatan terbuka`}>
+                {notes.open}
+              </span>
+            )}
+          </button>
           {aiEnabled && (
             <button
               type="button"
-              onClick={() => {
-                setChatOpen(!chatOpen);
-                setPanelOpen(false);
-              }}
+              onClick={() => openSide(chatOpen ? null : "chat")}
               aria-pressed={chatOpen}
               className={`${buttonClass("ghost", "sm")} max-sm:hidden ${chatOpen ? "bg-fill text-fg" : ""}`}
             >
@@ -706,7 +776,7 @@ export function PageEditor({
               publishedAt={publishedAt}
               hasChanges={hasChanges}
               busy={busy}
-              onPublish={publish}
+              onPublish={publishChecked}
               onUnpublish={unpublish}
               onDiscard={discard}
             />
@@ -722,22 +792,17 @@ export function PageEditor({
                       label: "AI Chat",
                       icon: <MessageSquareText className="size-4 text-accent" />,
                       active: chatOpen,
-                      onSelect: () => {
-                        setChatOpen(!chatOpen);
-                        setPanelOpen(false);
-                      },
+                      onSelect: () => openSide(chatOpen ? null : "chat"),
                     },
                   ]
                 : []),
+              { label: "Periksa", icon: <ListChecks className="size-4" />, active: reviewOpen, onSelect: () => openSide(reviewOpen ? null : "review") },
               { label: "Pratinjau", icon: <Eye className="size-4" />, onSelect: openPreview },
             ]}
           />
           <button
             type="button"
-            onClick={() => {
-              setPanelOpen(!panelOpen);
-              setChatOpen(false);
-            }}
+            onClick={() => openSide(panelOpen ? null : "settings")}
             aria-label="Pengaturan halaman"
             aria-pressed={panelOpen}
             className={`inline-flex size-8 items-center justify-center rounded-lg ${panelOpen ? "bg-fill text-fg" : "text-fg-muted hover:bg-fill"}`}
@@ -781,7 +846,7 @@ export function PageEditor({
         </div>
       )}
 
-      <main className={`px-5 pt-12 transition-[padding] sm:px-8 ${panelOpen ? "lg:pr-[24rem]" : chatOpen ? "lg:pr-[28rem]" : ""}`}>
+      <main className={`px-5 pt-12 transition-[padding] sm:px-8 ${panelOpen || reviewOpen ? "lg:pr-[24rem]" : chatOpen ? "lg:pr-[28rem]" : ""}`}>
         <div className="mx-auto max-w-3xl">
           <CoverPicker
             cover={cover}
@@ -842,21 +907,57 @@ export function PageEditor({
 
           {editor && (
             <>
-              <TextBubbleMenu editor={editor} onAi={aiEnabled ? openAiOnSelection : undefined} />
+              <TextBubbleMenu
+                editor={editor}
+                onAi={aiEnabled ? openAiOnSelection : undefined}
+                onNote={
+                  isHome
+                    ? undefined
+                    : (quote) => {
+                        setDraftQuote(quote);
+                        setReviewTab("notes");
+                        openSide("review");
+                      }
+                }
+              />
               <TableBubbleMenu editor={editor} />
               <ImageBubbleMenu editor={editor} />
               <BlockInsertMenu editor={editor} />
             </>
           )}
           {/* Wide screens get the outline beside the page; others a collapsible one here. */}
-          {editor && <InlineEditorOutline editor={editor} className={panelOpen || chatOpen ? "min-[1760px]:hidden" : "xl:hidden"} />}
+          {editor && <InlineEditorOutline editor={editor} className={panelOpen || chatOpen || reviewOpen ? "min-[1760px]:hidden" : "xl:hidden"} />}
           <div className="relative" onMouseLeave={() => hoverBus.emit({ hover: null })}>
             <EditorContent editor={editor} />
             {editor && <BlockHandle editor={editor} bus={hoverBus} />}
           </div>
         </div>
       </main>
-      {editor && <EditorOutline editor={editor} className={`hidden ${panelOpen || chatOpen ? "min-[1760px]:block" : "xl:block"}`} />}
+      {editor && <EditorOutline editor={editor} className={`hidden ${panelOpen || chatOpen || reviewOpen ? "min-[1760px]:block" : "xl:block"}`} />}
+
+      {reviewOpen && editor && (
+        <ReviewPanel
+          editor={editor}
+          tab={reviewTab}
+          onTab={setReviewTab}
+          title={title}
+          description={description}
+          seo={seo}
+          isHome={isHome}
+          pageId={page.id}
+          viewer={viewer}
+          canModerate={permissions.staff}
+          notes={notes}
+          draftQuote={draftQuote}
+          onDraftQuoteDone={() => setDraftQuote(null)}
+          activeNote={activeNote}
+          onActiveNote={setActiveNote}
+          onClose={() => {
+            setReviewOpen(false);
+            setActiveNote(null);
+          }}
+        />
+      )}
 
       {chatOpen && (
         <aside className="fixed top-14 right-0 bottom-0 z-30 flex w-full max-w-md flex-col border-l border-line bg-page shadow-xl">

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BookA,
   CalendarCheck,
   ChartColumn,
   ExternalLink,
@@ -79,6 +80,7 @@ const GROUPS: Group[] = [
         badge: (c) => (c.review ? { value: c.review, hint: `${c.review} halaman perlu ditinjau`, quiet: true } : null),
       },
       { href: "/admin/media", label: "Media", icon: ImageIcon },
+      { href: "/admin/glossary", label: "Glosarium", icon: BookA, need: "glossary.manage" },
       { href: "/admin/ai", label: "AI Chat", icon: MessageSquareText },
     ],
   },

@@ -195,6 +195,21 @@ function renderText(node: JSONContent, key: number): React.ReactNode {
       case "code":
         element = <code>{element}</code>;
         break;
+      case "glossary": {
+        // Added by applyGlossary() (lib/glossary.ts) on a term's first use; definitions are plain text.
+        const definition = typeof mark.attrs?.definition === "string" ? mark.attrs.definition : "";
+        if (!definition) break;
+        const tipId = `glosarium-${String(mark.attrs?.id ?? "").replace(/[^\w-]/g, "")}`;
+        element = (
+          <span className="glossary-term" tabIndex={0} aria-describedby={tipId} data-glossary-term>
+            {element}
+            <span role="tooltip" id={tipId} className="glossary-tip">
+              <b>{String(mark.attrs?.term ?? "")}</b> {definition}
+            </span>
+          </span>
+        );
+        break;
+      }
       case "link": {
         const href = safeHref(mark.attrs?.href);
         if (!href) break;

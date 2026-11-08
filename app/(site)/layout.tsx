@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import {
   getAskAiAvailable,
+  getGlossary,
   getHomeAlternates,
   getLanguageSettings,
   getNavigation,
@@ -13,7 +14,7 @@ import { SiteProvider } from "@/components/site-context";
 import { SiteHeader } from "@/components/site-header";
 
 export default async function SiteLayout({ children }: LayoutProps<"/">) {
-  const [site, tabs, searchIndex, askAi, languages, pageAlternates, homes] = await Promise.all([
+  const [site, tabs, searchIndex, askAi, languages, pageAlternates, homes, glossary] = await Promise.all([
     getSiteSettings(),
     getNavigation(),
     getSearchIndex(),
@@ -21,6 +22,7 @@ export default async function SiteLayout({ children }: LayoutProps<"/">) {
     getLanguageSettings(),
     getTranslationAlternates(),
     getHomeAlternates(),
+    getGlossary(),
   ]);
   // The switcher also moves between homes ("/" ↔ "/en") once a language has its own.
   const alternates = { ...pageAlternates, ...Object.fromEntries(Object.values(homes).map((href) => [href, homes])) };
@@ -39,7 +41,7 @@ export default async function SiteLayout({ children }: LayoutProps<"/">) {
   };
 
   return (
-    <SiteProvider value={{ site, tabs, i18n }}>
+    <SiteProvider value={{ site, tabs, i18n, glossary: glossary.terms.length > 0 }}>
       <SearchProvider index={searchIndex} indexes={Object.fromEntries(codes.map((code, i) => [code, localeIndexes[i]]))} ai={askAi}>
         <Suspense>
           <SiteHeader />

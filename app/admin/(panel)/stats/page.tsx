@@ -1,17 +1,20 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { ArrowDownRight, ArrowUpRight, ExternalLink, Eye, MessageSquareText, PenLine, Search, Sparkles, ThumbsDown, ThumbsUp, type LucideIcon } from "lucide-react";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, BookOpenCheck, ExternalLink, Eye, MessageSquareText, PenLine, Search, Sparkles, ThumbsDown, ThumbsUp, type LucideIcon } from "lucide-react";
 import { requirePermission } from "@/lib/auth/dal";
 import {
   FEEDBACK_FILTERS,
   RANGES,
   getAskStats,
+  getEngagement,
   getFeedbackCounts,
+  getSearchFlow,
   getSearchStats,
   getStatsOverview,
   getTopPages,
   listFeedback,
   type DailyViews,
+  type EngagementRow,
   type FeedbackFilter,
   type Range,
   type SearchStat,
@@ -41,13 +44,15 @@ async function Stats({ searchParams }: Pick<PageProps<"/admin/stats">, "searchPa
   const params = await searchParams;
   const range: Range = RANGES.find((r) => String(r) === params.range) ?? 30;
   const filter: FeedbackFilter = FEEDBACK_FILTERS.find((f) => f === params.feedback) ?? "open";
-  const [overview, pages, searches, asks, feedback, feedbackCounts] = await Promise.all([
+  const [overview, pages, searches, asks, feedback, feedbackCounts, engagement, flow] = await Promise.all([
     getStatsOverview(range),
     getTopPages(range),
     getSearchStats(range),
     getAskStats(range),
     listFeedback(filter),
     getFeedbackCounts(),
+    getEngagement(range),
+    getSearchFlow(range),
   ]);
   const href = (next: { range?: Range; feedback?: FeedbackFilter }) => `/admin/stats?range=${next.range ?? range}&feedback=${next.feedback ?? filter}`;
   const change = overview.previous ? Math.round(((overview.views - overview.previous) / overview.previous) * 100) : null;
@@ -179,6 +184,8 @@ async function Stats({ searchParams }: Pick<PageProps<"/admin/stats">, "searchPa
         )}
       </Panel>
 
+      <EngagementPanel range={range} engagement={engagement} />
+
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-2">
         <QueryPanel
           icon={Search}
@@ -195,6 +202,8 @@ async function Stats({ searchParams }: Pick<PageProps<"/admin/stats">, "searchPa
           misses={{ title: "Tidak terjawab", hint: "Belum dibahas artikel mana pun.", rows: asks.misses, value: (r) => r.misses, empty: "Semua pertanyaan terjawab." }}
         />
       </div>
+
+      <SearchFlowPanel flow={flow} />
 
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3">
@@ -344,6 +353,153 @@ function QueryPanel({ icon: Icon, title, summary, top, misses }: { icon: LucideI
             )}
           </div>
         ))}
+      </div>
+    </Panel>
+  );
+}
+
+const percent = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : 0);
+const duration = (seconds: number) => {
+  const s = Math.round(seconds);
+  return s < 60 ? `${s} dtk` : `${Math.floor(s / 60)} mnt ${String(s % 60).padStart(2, "0")} dtk`;
+};
+
+/**
+ * How articles are read: share of visits that reached the end, average time
+ * visible, and how often readers left the site from the page, with a small
+ * 25/50/75/100% funnel per page.
+ */
+function EngagementPanel({ range, engagement }: { range: Range; engagement: Awaited<ReturnType<typeof getEngagement>> }) {
+  const { pages, reads } = engagement;
+  return (
+    <Panel data-testid="engagement">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line px-5 py-3">
+        <div>
+          <h2 className="flex items-center gap-1.5 text-sm font-medium text-fg">
+            <BookOpenCheck className="size-4 text-accent" />
+            Cara artikel dibaca
+          </h2>
+          <p className="mt-0.5 text-xs text-fg-subtle">Seberapa jauh pembaca menggulir, berapa lama, dan dari halaman mana mereka meninggalkan situs.</p>
+        </div>
+        {reads > 0 && (
+          <p className="flex flex-wrap gap-x-4 text-xs text-fg-subtle tabular-nums">
+            <span>
+              Dibaca sampai akhir <b className="font-medium text-fg">{percent(engagement.depth100, reads)}%</b>
+            </span>
+            <span>
+              Rata-rata <b className="font-medium text-fg">{duration(engagement.seconds / reads)}</b>
+            </span>
+            <span>
+              Keluar situs <b className="font-medium text-fg">{percent(engagement.exits, reads)}%</b>
+            </span>
+          </p>
+        )}
+      </div>
+      {pages.length === 0 ? (
+        <p className="px-5 py-10 text-center text-sm text-fg-subtle">Belum ada data baca di {range} hari terakhir. Data terkumpul saat pembaca meninggalkan sebuah artikel.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[40rem] text-sm">
+            <thead>
+              <tr className="text-left text-xs text-fg-subtle">
+                <th className="px-5 py-2 font-normal">Halaman</th>
+                <th className="px-3 py-2 text-right font-normal">Dibaca</th>
+                <th className="px-3 py-2 font-normal">Sampai 25 · 50 · 75 · 100%</th>
+                <th className="px-3 py-2 text-right font-normal">Rata-rata waktu</th>
+                <th className="px-5 py-2 text-right font-normal" title="Kunjungan yang meninggalkan situs dari halaman ini">
+                  Keluar situs
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {pages.map((page) => (
+                <EngagementRowView key={page.id} page={page} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function EngagementRowView({ page }: { page: EngagementRow }) {
+  const steps = [page.depth25, page.depth50, page.depth75, page.depth100];
+  const exitRate = percent(page.exits, page.reads);
+  return (
+    <tr>
+      <td className="max-w-0 px-5 py-2.5">
+        <Link href={`/admin/pages/${page.id}`} className="block truncate text-fg hover:text-accent">
+          {page.title || "Tanpa judul"}
+        </Link>
+      </td>
+      <td className="px-3 py-2.5 text-right text-fg tabular-nums">{number.format(page.reads)}</td>
+      <td className="px-3 py-2.5">
+        <div className="flex h-5 items-end gap-0.5" title={steps.map((n, i) => `${(i + 1) * 25}%: ${percent(n, page.reads)}%`).join(" · ")}>
+          {steps.map((n, i) => (
+            <span key={i} className="flex w-8 flex-col items-center">
+              <span className="block w-full rounded-sm bg-accent/70" style={{ height: `${Math.max(2, percent(n, page.reads) * 0.2)}px` }} />
+            </span>
+          ))}
+          <span className="ml-2 text-xs text-fg-muted tabular-nums">{percent(page.depth100, page.reads)}%</span>
+        </div>
+      </td>
+      <td className="px-3 py-2.5 text-right text-fg-muted tabular-nums">{duration(page.seconds / Math.max(1, page.reads))}</td>
+      <td className={`px-5 py-2.5 text-right tabular-nums ${exitRate >= 60 ? "text-red-600 dark:text-red-400" : "text-fg-muted"}`}>{exitRate}%</td>
+    </tr>
+  );
+}
+
+/** Search → article: which result each query led to, and searches that found results but were never followed. */
+function SearchFlowPanel({ flow }: { flow: Awaited<ReturnType<typeof getSearchFlow>> }) {
+  return (
+    <Panel data-testid="search-flow">
+      <div className="border-b border-line px-5 py-3">
+        <h2 className="flex items-center gap-1.5 text-sm font-medium text-fg">
+          <ArrowRight className="size-4 text-accent" />
+          Dari pencarian ke artikel
+        </h2>
+        <p className="mt-0.5 text-xs text-fg-subtle">Artikel yang dibuka pembaca setelah mencari. Pencarian yang menemukan hasil tetapi tidak pernah diklik bisa berarti judulnya kurang jelas.</p>
+      </div>
+      <div className="grid divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+        <div className="min-w-0">
+          <h3 className="px-5 pt-3 pb-1 text-xs font-medium text-fg-muted">Paling sering diikuti</h3>
+          {flow.flows.length === 0 ? (
+            <p className="px-5 py-5 text-xs text-fg-subtle">Belum ada klik dari hasil pencarian.</p>
+          ) : (
+            <ul className="pb-2">
+              {flow.flows.map((row) => (
+                <li key={`${row.query}:${row.pageId}`} className="flex items-center gap-2 px-5 py-1.5 text-sm">
+                  <span className="max-w-[40%] shrink-0 truncate text-fg-muted" title={row.query}>
+                    “{row.query}”
+                  </span>
+                  <ArrowRight className="size-3 shrink-0 text-fg-subtle" />
+                  <Link href={`/admin/pages/${row.pageId}`} className="min-w-0 flex-1 truncate text-fg hover:text-accent" title={row.title}>
+                    {row.title}
+                  </Link>
+                  <span className="text-xs text-fg-subtle tabular-nums">{number.format(row.clicks)}×</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="min-w-0">
+          <h3 className="px-5 pt-3 pb-1 text-xs font-medium text-fg-muted">Ada hasil, tidak diklik</h3>
+          {flow.unclicked.length === 0 ? (
+            <p className="px-5 py-5 text-xs text-fg-subtle">Setiap pencarian yang menemukan hasil diikuti klik.</p>
+          ) : (
+            <ul className="pb-2">
+              {flow.unclicked.map((row) => (
+                <li key={row.query} className="flex items-center gap-2 px-5 py-1.5 text-sm">
+                  <span className="min-w-0 flex-1 truncate text-fg" title={row.query}>
+                    {row.query}
+                  </span>
+                  <span className="text-xs text-fg-subtle tabular-nums">{number.format(row.searches)}×</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </Panel>
   );

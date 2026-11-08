@@ -59,6 +59,34 @@ export async function recordView(slug: string) {
     on conflict (page_id, day) do update set views = page_views.views + 1`);
 }
 
+/** Longest visit that counts toward reading time, so a tab left open all day doesn't skew the average. */
+const MAX_READ_SECONDS = 1800;
+
+/** A finished visit of a published doc page: depth reached (0–100), seconds visible, and whether the reader left the site. */
+export async function recordRead(slug: string, depth: number, seconds: number, exit: boolean) {
+  const reached = (mark: number) => (depth >= mark ? 1 : 0);
+  await db.execute(sql`
+    insert into page_reads (page_id, day, reads, depth_25, depth_50, depth_75, depth_100, exits, seconds)
+    select id, ${today}, 1, ${reached(25)}, ${reached(50)}, ${reached(75)}, ${reached(100)}, ${exit ? 1 : 0}, ${Math.min(seconds, MAX_READ_SECONDS)}
+    from pages where slug = ${slug} and status = 'published' and kind = 'doc' and visibility = 'public'
+    on conflict (page_id, day) do update set
+      reads = page_reads.reads + 1,
+      depth_25 = page_reads.depth_25 + excluded.depth_25,
+      depth_50 = page_reads.depth_50 + excluded.depth_50,
+      depth_75 = page_reads.depth_75 + excluded.depth_75,
+      depth_100 = page_reads.depth_100 + excluded.depth_100,
+      exits = page_reads.exits + excluded.exits,
+      seconds = page_reads.seconds + excluded.seconds`);
+}
+
+/** A search result that was opened: query → published doc page. */
+export async function recordSearchClick(query: string, slug: string) {
+  await db.execute(sql`
+    insert into search_clicks (query, page_id, day, clicks)
+    select ${query}, id, ${today}, 1 from pages where slug = ${slug} and status = 'published' and kind = 'doc' and visibility = 'public'
+    on conflict (query, page_id, day) do update set clicks = search_clicks.clicks + 1`);
+}
+
 /** Lower-case, single-spaced query, or null when it is too short or long to be useful. */
 export function normaliseQuery(query: string) {
   const q = query.toLowerCase().replace(/\s+/g, " ").trim();

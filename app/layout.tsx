@@ -29,6 +29,8 @@ export async function generateMetadata(): Promise<Metadata> {
     title: { default: `${site.name} Docs`, template: `%s · ${site.name} Docs` },
     description: site.description,
     openGraph: { siteName: `${site.name} Docs` },
+    // Lets browsers and feed readers find "Apa yang baru" from any page.
+    alternates: { types: { "application/rss+xml": [{ url: "/rss.xml", title: `${site.name} Docs` }] } },
   };
 }
 

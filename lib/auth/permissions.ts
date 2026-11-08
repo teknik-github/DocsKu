@@ -18,6 +18,8 @@ export type Permission =
   | "pages.approve"
   | "pages.import"
   | "templates.manage"
+  /** Glossary terms and their tooltips. */
+  | "glossary.manage"
   | "home.edit"
   | "comments.moderate"
   | "stats.view"
@@ -33,6 +35,7 @@ const RULES: Record<Permission, readonly Role[]> = {
   "pages.approve": STAFF,
   "pages.import": STAFF,
   "templates.manage": STAFF,
+  "glossary.manage": STAFF,
   "home.edit": STAFF,
   "comments.moderate": STAFF,
   "stats.view": STAFF,

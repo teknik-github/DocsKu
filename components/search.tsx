@@ -5,16 +5,12 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { CornerDownLeft, FileText, Hash, Search, Sparkles } from "lucide-react";
 import type { SearchEntry } from "@/lib/site-types";
+import { searchIndex, type SearchResult } from "@/lib/search-engine";
 import { beacon } from "@/components/reader-footer";
 import { useSite } from "@/components/site-context";
 import { t } from "@/lib/i18n";
 
-export type Result = {
-  href: string;
-  title: string;
-  context: string;
-  kind: "page" | "heading";
-};
+export type Result = SearchResult;
 
 const SearchContext = createContext<() => void>(() => {});
 
@@ -34,41 +30,17 @@ function reportQuery(pending: { current: PendingQuery }, reported: Set<string>) 
   beacon("/api/track", { type: "search", query, found: item.found });
 }
 
+/** Results for a query (see lib/search-engine.ts: prefixes, synonyms, typos). Used by the widget too. */
 export function search(index: SearchEntry[], query: string): Result[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) {
-    return index.map((entry) => ({
-      href: entry.href,
-      title: entry.title,
-      context: `${entry.tab} · ${entry.section}`,
-      kind: "page",
-    }));
-  }
-  const matches = (text: string) => terms.every((term) => text.toLowerCase().includes(term));
-  const scored: (Result & { score: number })[] = [];
-  for (const entry of index) {
-    if (matches(`${entry.title} ${entry.section} ${entry.description}`)) {
-      scored.push({
-        href: entry.href,
-        title: entry.title,
-        context: entry.description || `${entry.tab} · ${entry.section}`,
-        kind: "page",
-        score: matches(entry.title) ? 3 : 2,
-      });
-    }
-    for (const heading of entry.headings) {
-      if (matches(heading.text)) {
-        scored.push({
-          href: `${entry.href}#${heading.id}`,
-          title: heading.text,
-          context: entry.title,
-          kind: "heading",
-          score: 1,
-        });
-      }
-    }
-  }
-  return scored.sort((a, b) => b.score - a.score).slice(0, 20);
+  return searchIndex(index, query).results;
+}
+
+/** Records which article a search led to (the dashboard's "Dari pencarian ke artikel"). */
+function reportClick(query: string, href: string) {
+  const q = query.toLowerCase().replace(/\s+/g, " ").trim();
+  const slug = href.replace(/^\/docs\//, "").replace(/#.*$/, "");
+  if (q.length < 2 || q.length > 100 || !slug || slug === href) return;
+  beacon("/api/track", { type: "search_click", query: q, slug });
 }
 
 export function SearchProvider({
@@ -114,7 +86,12 @@ function SearchDialog({ index, ai, locale, onClose }: { index: SearchEntry[]; ai
   /** The question being answered by AI, shown instead of the results. */
   const [asked, setAsked] = useState<string | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const results = search(index, query);
+  /** Category (navigation section) the results are narrowed to; null = all. */
+  const [category, setCategory] = useState<string | null>(null);
+  const outcome = searchIndex(index, query);
+  // Sections among the results, in result order, for the filter chips.
+  const sections = query.trim() ? [...new Set(outcome.results.map((result) => result.section).filter(Boolean))] : [];
+  const results = category && sections.includes(category) ? outcome.results.filter((result) => result.section === category) : outcome.results;
   const canAsk = ai && query.trim().length >= MIN_QUESTION;
   // With "Tanya AI" on, it is row 0 and the results follow.
   const offset = canAsk ? 1 : 0;
@@ -124,7 +101,7 @@ function SearchDialog({ index, ai, locale, onClose }: { index: SearchEntry[]; ai
 
   // A query counts once typing pauses for 1.5 s, or when the dialog closes.
   useEffect(() => {
-    pending.current = query.trim() ? { query, found: search(index, query).length > 0 } : null;
+    pending.current = query.trim() ? { query, found: searchIndex(index, query).results.length > 0 } : null;
     const timer = setTimeout(() => reportQuery(pending, reported.current), 1500);
     return () => clearTimeout(timer);
   }, [index, query]);
@@ -141,6 +118,7 @@ function SearchDialog({ index, ai, locale, onClose }: { index: SearchEntry[]; ai
 
   function go(result: Result | undefined) {
     if (!result) return;
+    if (query.trim()) reportClick(query, result.href);
     onClose();
     router.push(result.href);
   }
@@ -196,6 +174,7 @@ function SearchDialog({ index, ai, locale, onClose }: { index: SearchEntry[]; ai
               setQuery(event.target.value);
               setActive(0);
               setAsked(null);
+              setCategory(null);
             }}
             onKeyDown={onKeyDown}
             placeholder={t(locale, ai ? "searchOrAsk" : "searchDocs")}
@@ -208,6 +187,41 @@ function SearchDialog({ index, ai, locale, onClose }: { index: SearchEntry[]; ai
         {asked !== null ? (
           <AskAnswer key={asked} question={asked} locale={locale} onBack={() => setAsked(null)} onNavigate={navigate} />
         ) : (
+        <>
+        {sections.length > 1 && (
+          <div role="group" aria-label={t(locale, "allCategories")} className="flex gap-1.5 overflow-x-auto border-b border-line px-3 py-2" data-testid="search-categories">
+            {[null, ...sections].map((section) => (
+              <button
+                key={section ?? "_all"}
+                type="button"
+                aria-pressed={category === section}
+                onClick={() => {
+                  setCategory(section);
+                  setActive(0);
+                }}
+                className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                  category === section ? "border-accent bg-accent-soft text-accent" : "border-line text-fg-muted hover:text-fg"
+                }`}
+              >
+                {section ?? t(locale, "allCategories")}
+              </button>
+            ))}
+          </div>
+        )}
+        {outcome.suggestion && (
+          <button
+            type="button"
+            data-testid="search-suggestion"
+            onClick={() => {
+              setQuery(outcome.suggestion ?? "");
+              setActive(0);
+              setCategory(null);
+            }}
+            className="block w-full border-b border-line px-4 py-2 text-left text-xs text-fg-muted hover:text-fg"
+          >
+            {t(locale, "didYouMean", { q: outcome.suggestion })}
+          </button>
+        )}
         <ul ref={listRef} className="max-h-[60vh] overflow-y-auto p-2">
           {canAsk && (
             <li>
@@ -264,6 +278,7 @@ function SearchDialog({ index, ai, locale, onClose }: { index: SearchEntry[]; ai
             );
           })}
         </ul>
+        </>
         )}
       </div>
     </div>

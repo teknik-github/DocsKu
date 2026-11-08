@@ -13,6 +13,7 @@ import type {
   AskAiSettings,
   AutomationSettings,
   CommentSettings,
+  GlossarySettings,
   CoverShape,
   NavItem,
   NavItemData,
@@ -82,6 +83,18 @@ export async function getCommentSettings(): Promise<CommentSettings> {
   cacheTag("settings");
   cacheLife("max");
   return { ...DEFAULT_COMMENTS, ...(await readSetting<Partial<CommentSettings>>("comments")) };
+}
+
+export const DEFAULT_GLOSSARY: GlossarySettings = { terms: [], tooltips: true };
+
+/** The glossary terms, sorted A–Z, and whether articles show them as tooltips (settings key "glossary"). */
+export async function getGlossary(): Promise<GlossarySettings> {
+  "use cache";
+  cacheTag("settings");
+  cacheLife("max");
+  if (buildingWithoutDatabase) return DEFAULT_GLOSSARY;
+  const stored = { ...DEFAULT_GLOSSARY, ...(await readSetting<Partial<GlossarySettings>>("glossary")) };
+  return { ...stored, terms: [...stored.terms].sort((a, b) => a.term.localeCompare(b.term, "id", { sensitivity: "base" })) };
 }
 
 /** Settings key of a language's published home ("home" for the default language, "home:<code>" otherwise). */

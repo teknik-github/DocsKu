@@ -125,6 +125,20 @@ export type AutomationSettings = {
   coverColor: string;
 };
 
+/** One glossary entry: the term, other spellings that mean it, and a short plain-text definition. */
+export type GlossaryTerm = {
+  id: string;
+  term: string;
+  aliases: string[];
+  definition: string;
+};
+
+/** Glossary (settings key "glossary"): the public /glosarium page and, with `tooltips`, definitions on the first use of a term in articles. */
+export type GlossarySettings = {
+  terms: GlossaryTerm[];
+  tooltips: boolean;
+};
+
 /** Public comments under docs pages (settings key "comments"). */
 export type CommentSettings = {
   /** Show the comment section and accept new comments. */

@@ -4,7 +4,7 @@ import { widgetEnabled, widgetFrameSources } from "@/lib/widget-frame";
 import { PROXY_SESSION_COOKIE, authorExists, docPathExists, languageHomeExists, widgetArticleExists } from "@/lib/route-exists";
 
 /** First path segments owned by other routes; anything else with one segment may be a language home (/<code>). */
-const TOP_LEVEL = new Set(["admin", "api", "docs", "internal", "penulis", "preview", "cover", "media", "widget", "_next"]);
+const TOP_LEVEL = new Set(["admin", "api", "docs", "internal", "penulis", "preview", "cover", "media", "widget", "terbaru", "glosarium", "_next"]);
 
 /**
  * A real 404 for a missing page: rewritten to a path no route matches, so the

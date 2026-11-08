@@ -227,6 +227,15 @@ const id = {
   noArticlesToShow: "Belum ada artikel untuk ditampilkan.",
   openTab: "Buka {name}",
   helpCenterOf: "Pusat bantuan {name}",
+  whatsNew: "Apa yang baru",
+  whatsNewIntro: "Artikel yang baru terbit dan yang baru diperbarui, dari yang terbaru.",
+  newBadge: "Baru",
+  updatedBadge: "Diperbarui",
+  rssFeed: "Feed RSS",
+  glossary: "Glosarium",
+  glossaryIntro: "Istilah yang sering dipakai di dokumentasi ini, beserta artinya.",
+  allCategories: "Semua",
+  didYouMean: "Mungkin maksud Anda “{q}”",
 } as const;
 
 export type I18nKey = keyof typeof id;
@@ -384,6 +393,15 @@ const en: Record<I18nKey, string> = {
   noArticlesToShow: "No articles to show yet.",
   openTab: "Open {name}",
   helpCenterOf: "{name} help center",
+  whatsNew: "What's new",
+  whatsNewIntro: "Newly published and recently updated articles, newest first.",
+  newBadge: "New",
+  updatedBadge: "Updated",
+  rssFeed: "RSS feed",
+  glossary: "Glossary",
+  glossaryIntro: "Terms used throughout this documentation, and what they mean.",
+  allCategories: "All",
+  didYouMean: "Did you mean “{q}”",
 };
 
 const DICTIONARIES: Record<string, Record<I18nKey, string>> = { id, en };

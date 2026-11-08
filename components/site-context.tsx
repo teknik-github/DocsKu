@@ -16,7 +16,13 @@ export type SiteI18n = {
   alternates: Record<string, Alternates>;
 };
 
-type SiteData = { site: SiteSettings; tabs: NavTab[]; i18n?: SiteI18n };
+type SiteData = {
+  site: SiteSettings;
+  tabs: NavTab[];
+  i18n?: SiteI18n;
+  /** The glossary has terms, so /glosarium exists (linked from the footer). */
+  glossary?: boolean;
+};
 
 const SiteContext = createContext<SiteData | null>(null);
 

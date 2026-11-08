@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { applyGlossary } from "@/lib/glossary";
 import { notFound, redirect } from "next/navigation";
 import { Eye } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth/dal";
@@ -8,7 +9,7 @@ import { getPageForEditor } from "@/lib/data/admin";
 import { DocArticle, DocSkeleton } from "@/components/doc-article";
 import { HomeArticle } from "@/components/home-article";
 import { PublicationArticle } from "@/components/publication/registry";
-import { getNavigation, getSiteSettings, readingMinutes } from "@/lib/data/site";
+import { getGlossary, getNavigation, getSiteSettings, readingMinutes } from "@/lib/data/site";
 import { getAuthor } from "@/lib/data/authors";
 import { AuthorBox } from "@/components/author";
 
@@ -48,7 +49,8 @@ async function Preview({ params }: Pick<PageProps<"/preview/[id]">, "params">) {
   // Preview with the layout visitors will see.
   // A translation previews with its language's navigation.
   const locale = page.translationOf ? page.locale : undefined;
-  const [site, tabs] = await Promise.all([getSiteSettings(), getNavigation(locale)]);
+  const [site, tabs, glossary] = await Promise.all([getSiteSettings(), getNavigation(locale), getGlossary()]);
+  const doc = glossary.tooltips && !page.translationOf ? applyGlossary(page.draftContent, glossary.terms) : page.draftContent;
   const layout = site.layout ?? "docs";
   const author = site.showAuthors === false ? null : await getAuthor(page.authorId ?? page.updatedById);
   const footer = <AuthorBox author={author} />;
@@ -57,7 +59,7 @@ async function Preview({ params }: Pick<PageProps<"/preview/[id]">, "params">) {
       href: `/docs/${page.slug}`,
       title: page.draftTitle || "Tanpa judul",
       description: page.draftDescription,
-      doc: page.draftContent,
+      doc,
       cover: page.draftCoverImage,
       publishedAt: page.publishedAt?.toISOString() ?? null,
       readingMinutes: readingMinutes(page.draftContent),
@@ -75,7 +77,7 @@ async function Preview({ params }: Pick<PageProps<"/preview/[id]">, "params">) {
       <DocArticle
         title={page.draftTitle || "Tanpa judul"}
         description={page.draftDescription}
-        doc={page.draftContent}
+        doc={doc}
         banner={banner}
         footer={footer}
         author={author}

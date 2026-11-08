@@ -15,6 +15,7 @@ import {
   Sparkles,
   Strikethrough,
   Trash2,
+  StickyNote,
   Unlink,
 } from "lucide-react";
 
@@ -48,7 +49,7 @@ function MenuButton({
   );
 }
 
-export function TextBubbleMenu({ editor, onAi }: { editor: Editor; onAi?: (action: AiActionId) => void }) {
+export function TextBubbleMenu({ editor, onAi, onNote }: { editor: Editor; onAi?: (action: AiActionId) => void; onNote?: (quote: string) => void }) {
   const [linkMode, setLinkMode] = useState(false);
   const [aiMenu, setAiMenu] = useState(false);
   const [href, setHref] = useState("");
@@ -167,6 +168,20 @@ export function TextBubbleMenu({ editor, onAi }: { editor: Editor; onAi?: (actio
             <MenuButton label="Hapus tautan" onClick={() => editor.chain().focus().extendMarkRange("link").unsetLink().run()}>
               <Unlink className="size-3.5" />
             </MenuButton>
+          )}
+          {onNote && (
+            <>
+              <span className="mx-0.5 h-4 w-px bg-line" />
+              <MenuButton
+                label="Catatan internal"
+                onClick={() => {
+                  const { from, to } = editor.state.selection;
+                  onNote(editor.state.doc.textBetween(from, to, " ").replace(/\s+/g, " ").trim().slice(0, 300));
+                }}
+              >
+                <StickyNote className="size-3.5" />
+              </MenuButton>
+            </>
           )}
         </>
       )}

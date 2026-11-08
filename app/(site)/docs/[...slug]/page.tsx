@@ -1,9 +1,11 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
+import { applyGlossary } from "@/lib/glossary";
 import { notFound } from "next/navigation";
 import {
   generatedCover,
   getAutomation,
+  getGlossary,
   getLanguageSettings,
   getNavigation,
   getPublishedPage,
@@ -95,12 +97,14 @@ async function DocContent({ params }: Pick<PageProps<"/docs/[...slug]">, "params
   const hub = await hubLanguage(slug);
   if (hub) return <DocsHub locale={hub} />;
   // /docs/<code>/… belongs to that language: its navigation, cards and chrome.
-  const locale = localeFromSlug(slug.join("/"), await getLanguageSettings());
-  const [found, tabs, site, automation] = await Promise.all([
+  const languages = await getLanguageSettings();
+  const locale = localeFromSlug(slug.join("/"), languages);
+  const [found, tabs, site, automation, glossary] = await Promise.all([
     getPublishedPage(slug.join("/")),
     getNavigation(locale),
     getSiteSettings(),
     getAutomation(),
+    getGlossary(),
   ]);
   // Not public: an internal article, for signed-in team members only (session checked on the server).
   const internal = found ? null : await getInternalPage(slug.join("/"));
@@ -108,6 +112,8 @@ async function DocContent({ params }: Pick<PageProps<"/docs/[...slug]">, "params
   if (!page) notFound();
 
   const href = slugToHref(page.slug);
+  // Glossary terms (default language) get a definition tooltip on their first use.
+  const doc = glossary.tooltips && locale === languages.defaultLocale ? applyGlossary(page.content, glossary.terms) : page.content;
   // Tema → Penulis: byline under the title and "Tentang penulis" after the content.
   const author = site.showAuthors === false ? null : await getAuthor(page.authorId);
   // Internal articles get no views, votes or comments.
@@ -124,7 +130,7 @@ async function DocContent({ params }: Pick<PageProps<"/docs/[...slug]">, "params
       href,
       title: page.title,
       description: page.description,
-      doc: page.content,
+      doc,
       cover: page.coverImage,
       autoCover: !internal && automation.cover ? generatedCover(page.slug, "wide", automation.coverColor) : null,
       publishedAt: page.publishedAt?.toISOString() ?? null,
@@ -144,7 +150,7 @@ async function DocContent({ params }: Pick<PageProps<"/docs/[...slug]">, "params
         title={page.title}
         description={page.description}
         section={findPage(tabs, href)?.section}
-        doc={page.content}
+        doc={doc}
         prev={prev}
         next={next}
         footer={footer}

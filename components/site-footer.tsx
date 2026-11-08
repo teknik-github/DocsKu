@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { Rss } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { useSite } from "@/components/site-context";
+import { t } from "@/lib/i18n";
 
 /**
  * The site footer in the language being read: `useSite()` applies that
  * language's description and columns (Pengaturan → Umum → per language), if any.
  */
 export function SiteFooter() {
-  const { site, homeHref } = useSite();
+  const { site, homeHref, glossary, locale } = useSite();
   return (
     <footer className="border-t border-line">
       <div className="mx-auto flex max-w-6xl flex-col gap-10 px-6 py-12 md:flex-row md:justify-between">
@@ -33,6 +35,20 @@ export function SiteFooter() {
             </div>
           ))}
         </div>
+      </div>
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 border-t border-line px-6 py-4 text-xs text-fg-subtle">
+        <Link href="/terbaru" className="transition-colors hover:text-fg">
+          {t(locale, "whatsNew")}
+        </Link>
+        {glossary && (
+          <Link href="/glosarium" className="transition-colors hover:text-fg">
+            {t(locale, "glossary")}
+          </Link>
+        )}
+        <a href="/rss.xml" className="inline-flex items-center gap-1 transition-colors hover:text-fg">
+          <Rss className="size-3" />
+          RSS
+        </a>
       </div>
     </footer>
   );

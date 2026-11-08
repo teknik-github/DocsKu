@@ -488,3 +488,66 @@ export const webhookDeliveries = pgTable(
   },
   (t) => [index("webhook_deliveries_due_idx").on(t.status, t.nextAttemptAt), index("webhook_deliveries_hook_idx").on(t.webhookId, t.createdAt)],
 );
+
+/**
+ * Internal notes on a page in the editor ("cek lagi angka ini"): never public.
+ * `quote` is the text that was selected when the note was written; the editor
+ * highlights it while it still appears in the working copy. Replies are one level deep.
+ */
+export const pageNotes = pgTable(
+  "page_notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    parentId: uuid("parent_id").references((): AnyPgColumn => pageNotes.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
+    quote: text("quote").notNull().default(""),
+    body: text("body").notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedById: uuid("resolved_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("page_notes_page_idx").on(t.pageId, t.createdAt), index("page_notes_parent_idx").on(t.parentId)],
+);
+
+export type PageNote = typeof pageNotes.$inferSelect;
+
+/**
+ * How far readers got on a published page, per Asia/Jakarta day: one `reads` per
+ * finished visit, the depth buckets count visits that reached 25/50/75/100% of
+ * the article, and `exits` counts visits that left the site from this page.
+ */
+export const pageReads = pgTable(
+  "page_reads",
+  {
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    reads: integer("reads").notNull().default(0),
+    depth25: integer("depth_25").notNull().default(0),
+    depth50: integer("depth_50").notNull().default(0),
+    depth75: integer("depth_75").notNull().default(0),
+    depth100: integer("depth_100").notNull().default(0),
+    exits: integer("exits").notNull().default(0),
+    /** Sum of seconds the page was visible, capped per visit (average = seconds / reads). */
+    seconds: integer("seconds").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.pageId, t.day] }), index("page_reads_day_idx").on(t.day)],
+);
+
+/** Which article a search led to: query → page, per Asia/Jakarta day. */
+export const searchClicks = pgTable(
+  "search_clicks",
+  {
+    query: text("query").notNull(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    clicks: integer("clicks").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.query, t.pageId, t.day] }), index("search_clicks_day_idx").on(t.day)],
+);

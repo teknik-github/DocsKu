@@ -72,7 +72,7 @@ export async function pruneActivity() {
 
 /** Filters of /admin/activity: kinds group dotted actions by their prefix. */
 export const ACTIVITY_KINDS = {
-  halaman: { label: "Halaman & templat", prefixes: ["page.", "template."] },
+  halaman: { label: "Halaman & templat", prefixes: ["page.", "template.", "glossary.", "note."] },
   struktur: { label: "Kategori, navigasi & beranda", prefixes: ["category.", "navigation.", "home."] },
   komentar: { label: "Komentar", prefixes: ["comment."] },
   media: { label: "Media", prefixes: ["media."] },

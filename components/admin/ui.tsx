@@ -101,8 +101,12 @@ export function PageHeader({
   );
 }
 
-export function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-xl border border-line bg-surface ${className}`}>{children}</div>;
+export function Panel({ children, className = "", ...rest }: { children: ReactNode; className?: string; "data-testid"?: string }) {
+  return (
+    <div {...rest} className={`rounded-xl border border-line bg-surface ${className}`}>
+      {children}
+    </div>
+  );
 }
 
 export function StatusBadge({ status }: { status: "draft" | "scheduled" | "published" }) {
