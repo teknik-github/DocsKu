@@ -1,5 +1,6 @@
 "use client";
 
+import { t } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import { ArrowLeft, FileText, Sparkles } from "lucide-react";
 import { readNdjson, renderChatMarkdown } from "@/components/admin/editor/ai-client";
@@ -13,7 +14,18 @@ type State = { status: "loading" | "streaming" | "done" | "miss" | "error"; text
  * answer (Markdown, raw HTML escaped) with links to the articles it came from.
  * Loaded only when a visitor asks, so the Markdown renderer stays out of the page bundle.
  */
-export default function AskAnswer({ question, onBack, onNavigate }: { question: string; onBack: () => void; onNavigate: (href: string) => void }) {
+export default function AskAnswer({
+  question,
+  locale,
+  onBack,
+  onNavigate,
+}: {
+  question: string;
+  /** The reader's language: the answer comes from that language's pages and is written in it. */
+  locale?: string;
+  onBack: () => void;
+  onNavigate: (href: string) => void;
+}) {
   const [state, setState] = useState<State>({ status: "loading", text: "", sources: [] });
 
   useEffect(() => {
@@ -23,7 +35,7 @@ export default function AskAnswer({ question, onBack, onNavigate }: { question: 
         const res = await fetch("/api/ask", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ question }),
+          body: JSON.stringify(locale ? { question, locale } : { question }),
           signal: controller.signal,
         });
         await readNdjson<AskEvent>(res, (event) =>
@@ -40,7 +52,7 @@ export default function AskAnswer({ question, onBack, onNavigate }: { question: 
       }
     })();
     return () => controller.abort();
-  }, [question]);
+  }, [question, locale]);
 
   // Links in the answer go through the router and close the search box.
   function onClick(event: React.MouseEvent) {
@@ -59,11 +71,11 @@ export default function AskAnswer({ question, onBack, onNavigate }: { question: 
       <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
         <button type="button" onClick={onBack} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg">
           <ArrowLeft className="size-3.5" />
-          Hasil pencarian
+          {t(locale, "backToResults")}
         </button>
         <span className="flex items-center gap-1.5 text-xs font-medium text-accent">
           <Sparkles className={`size-3.5 ${working ? "animate-pulse" : ""}`} />
-          Tanya AI
+          {t(locale, "askAi")}
         </span>
       </div>
 
@@ -72,7 +84,7 @@ export default function AskAnswer({ question, onBack, onNavigate }: { question: 
 
         {status === "loading" && (
           <div className="mt-4 space-y-2" aria-live="polite">
-            <p className="text-sm text-fg-subtle">Mencari jawaban di dokumentasi…</p>
+            <p className="text-sm text-fg-subtle">{t(locale, "askSearching")}</p>
             <div className="h-3 w-11/12 animate-pulse rounded bg-fill" />
             <div className="h-3 w-4/5 animate-pulse rounded bg-fill" />
             <div className="h-3 w-2/3 animate-pulse rounded bg-fill" />
@@ -90,7 +102,7 @@ export default function AskAnswer({ question, onBack, onNavigate }: { question: 
 
         {status === "miss" && (
           <p className="mt-3 rounded-lg bg-fill px-3 py-2.5 text-sm text-fg-muted">
-            Dokumentasi belum membahas pertanyaan ini. Coba kata lain, atau buka artikel yang mungkin terkait di bawah.
+            {t(locale, "askMiss")}
           </p>
         )}
 
@@ -98,7 +110,7 @@ export default function AskAnswer({ question, onBack, onNavigate }: { question: 
 
         {sources.length > 0 && status !== "loading" && (
           <div className="mt-5">
-            <p className="mb-1.5 text-xs font-medium text-fg-subtle">{status === "miss" ? "Mungkin terkait" : "Sumber"}</p>
+            <p className="mb-1.5 text-xs font-medium text-fg-subtle">{t(locale, status === "miss" ? "askMaybeRelated" : "askSources")}</p>
             <ul className="space-y-1">
               {sources.map((source) => (
                 <li key={source.href}>
@@ -120,7 +132,7 @@ export default function AskAnswer({ question, onBack, onNavigate }: { question: 
         )}
 
         {(status === "done" || status === "streaming") && (
-          <p className="mt-4 text-[11px] text-fg-subtle">Jawaban dibuat AI dari isi dokumentasi dan bisa keliru. Periksa artikel sumbernya.</p>
+          <p className="mt-4 text-[11px] text-fg-subtle">{t(locale, "askDisclaimer")}</p>
         )}
       </div>
     </div>

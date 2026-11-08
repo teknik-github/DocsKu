@@ -4,12 +4,20 @@ import { updateTag } from "next/cache";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
-import { addStaffComment, addStaffReply, COMMENT_STATUSES, deleteComment as removeComment, MAX_COMMENT, setCommentStatus } from "@/lib/comments";
+import { logActivity, pageLabel } from "@/lib/activity";
+import { eq } from "drizzle-orm";
+import { addStaffComment, addStaffReply, COMMENT_STATUSES, deleteComment as removeComment, deleteComments as removeComments, MAX_COMMENT, setCommentStatus } from "@/lib/comments";
 import type { CommentSettings } from "@/lib/site-types";
 
 type Result = { ok: true } | { ok: false; error: string };
 
 const idSchema = z.uuid();
+
+/** "Sari: Bagaimana cara…" for the log. */
+async function commentLabel(id: string) {
+  const [row] = await db.select({ name: schema.pageComments.authorName, body: schema.pageComments.body }).from(schema.pageComments).where(eq(schema.pageComments.id, id));
+  return row ? `${row.name}: ${row.body.replace(/\s+/g, " ").slice(0, 80)}` : null;
+}
 const notFound: Result = { ok: false, error: "Komentar tidak ditemukan." };
 
 /** Approve, mark as spam, or send back to the queue. Editors and admins. */
@@ -18,6 +26,7 @@ export async function moderateComment(id: string, status: (typeof COMMENT_STATUS
   if ("error" in user) return { ok: false, error: user.error };
   if (!idSchema.safeParse(id).success || !COMMENT_STATUSES.includes(status)) return notFound;
   await setCommentStatus([id], status);
+  await logActivity({ user, action: "comment.moderate", target: { type: "comment", id, label: await commentLabel(id) }, meta: { status, count: 1 } });
   return { ok: true };
 }
 
@@ -26,7 +35,9 @@ export async function deleteComment(id: string): Promise<Result> {
   const user = await authorize();
   if ("error" in user) return { ok: false, error: user.error };
   if (!idSchema.safeParse(id).success) return notFound;
+  const label = await commentLabel(id);
   await removeComment(id);
+  await logActivity({ user, action: "comment.delete", target: { type: "comment", id, label }, meta: { count: 1 } });
   return { ok: true };
 }
 
@@ -38,16 +49,30 @@ export async function replyToComment(input: { id: string; body: string }): Promi
   if ("error" in user) return { ok: false, error: user.error };
   const parsed = replySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  return (await addStaffReply(parsed.data.id, user.name, parsed.data.body)) ? { ok: true } : notFound;
+  if (!(await addStaffReply(parsed.data.id, user.name, parsed.data.body))) return notFound;
+  await logActivity({ user, action: "comment.reply", target: { type: "comment", id: parsed.data.id, label: await commentLabel(parsed.data.id) } });
+  return { ok: true };
 }
 
-/** "Setujui semua": approve several comments at once (the pending tab). */
-export async function approveComments(ids: string[]): Promise<Result> {
+/** Bulk actions in Komentar: set one status on several comments. */
+export async function moderateComments(ids: string[], status: (typeof COMMENT_STATUSES)[number]): Promise<Result> {
+  const user = await authorize();
+  if ("error" in user) return { ok: false, error: user.error };
+  const parsed = z.array(idSchema).min(1).max(200).safeParse(ids);
+  if (!parsed.success || !COMMENT_STATUSES.includes(status)) return { ok: false, error: "Pilihan tidak valid." };
+  await setCommentStatus(parsed.data, status);
+  await logActivity({ user, action: "comment.moderate", target: { type: "comment" }, meta: { status, count: parsed.data.length } });
+  return { ok: true };
+}
+
+/** Bulk delete in Komentar (replies of a deleted comment go with it). */
+export async function deleteComments(ids: string[]): Promise<Result> {
   const user = await authorize();
   if ("error" in user) return { ok: false, error: user.error };
   const parsed = z.array(idSchema).min(1).max(200).safeParse(ids);
   if (!parsed.success) return { ok: false, error: "Pilihan tidak valid." };
-  await setCommentStatus(parsed.data, "approved");
+  await removeComments(parsed.data);
+  await logActivity({ user, action: "comment.delete", target: { type: "comment" }, meta: { count: parsed.data.length } });
   return { ok: true };
 }
 
@@ -62,7 +87,9 @@ export async function postStaffComment(input: { pageId: string; body: string }):
   if ("error" in user) return { ok: false, error: user.error };
   const parsed = staffCommentSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  return (await addStaffComment(parsed.data.pageId, user.name, parsed.data.body)) ? { ok: true } : { ok: false, error: "Halaman tidak ditemukan atau belum terbit." };
+  if (!(await addStaffComment(parsed.data.pageId, user.name, parsed.data.body))) return { ok: false, error: "Halaman tidak ditemukan atau belum terbit." };
+  await logActivity({ user, action: "comment.create", target: { type: "page", id: parsed.data.pageId, label: await pageLabel(parsed.data.pageId) } });
+  return { ok: true };
 }
 
 const settingsSchema = z.object({ enabled: z.boolean(), moderation: z.boolean() });
@@ -78,5 +105,6 @@ export async function saveCommentSettings(input: CommentSettings): Promise<Resul
     .values({ key: "comments", value: parsed.data })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value: parsed.data } });
   updateTag("settings");
+  await logActivity({ user, action: "settings.save", target: { type: "settings", id: "komentar", label: "Komentar" }, meta: parsed.data });
   return { ok: true };
 }

@@ -22,6 +22,8 @@ export const pageStatusEnum = pgEnum("page_status", ["draft", "scheduled", "publ
 export const commentStatusEnum = pgEnum("comment_status", ["pending", "approved", "spam"]);
 /** "home" is the single page shown at "/"; everything else lives under /docs. */
 export const pageKindEnum = pgEnum("page_kind", ["doc", "home"]);
+/** "internal" pages are readable only by signed-in team members and never appear on the public site. */
+export const pageVisibilityEnum = pgEnum("page_visibility", ["public", "internal"]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -37,8 +39,37 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   passwordHash: text("password_hash").notNull(),
   role: roleEnum("role").notNull().default("editor"),
+  /** Public author profile: URL slug (/penulis/<slug>), photo (/media/… or https), job title, short bio, and links. */
+  username: text("username").unique(),
+  avatar: text("avatar"),
+  jobTitle: text("job_title"),
+  bio: text("bio"),
+  links: jsonb("links").$type<{ label: string; url: string }[]>().notNull().default([]),
+  /** Two-step login (TOTP): the secret, AES-GCM encrypted with ENCRYPTION_KEY; set only once confirmed. */
+  totpSecret: text("totp_secret"),
+  totpEnabledAt: timestamp("totp_enabled_at", { withTimezone: true }),
+  /** SHA-256 hashes of the unused one-time recovery codes. */
+  recoveryCodes: text("recovery_codes").array().notNull().default(sql`'{}'::text[]`),
   ...timestamps,
 });
+
+/**
+ * A password-checked login waiting for its second step (TOTP or recovery code).
+ * The id is the SHA-256 of a short-lived cookie token; it is never a session.
+ */
+export const loginChallenges = pgTable(
+  "login_challenges",
+  {
+    id: text("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("login_challenges_user_idx").on(t.userId)],
+);
 
 /** Session id is the SHA-256 of the cookie token, so a DB leak can't be replayed. */
 export const sessions = pgTable(
@@ -85,6 +116,16 @@ export const pages = pgTable(
      * "none" to leave it out, or null to let AI (or the first section) decide.
      */
     navSection: text("nav_section"),
+    /** Language of the page (BCP 47 code from the site's language settings, e.g. "id", "en"). */
+    locale: text("locale").notNull().default("id"),
+    /** For a translation: the page it translates (in the default language). Null for originals. */
+    translationOf: uuid("translation_of").references((): AnyPgColumn => pages.id, { onDelete: "set null" }),
+    /** Who may read it; applies immediately (not part of the draft). */
+    visibility: pageVisibilityEnum("visibility").notNull().default("public"),
+    /** Content review: the person responsible, how often (days; null = site default), and when it was last confirmed current. */
+    ownerId: uuid("owner_id").references(() => users.id, { onDelete: "set null" }),
+    reviewIntervalDays: integer("review_interval_days"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     /** Working copy differs from what is live. */
     hasChanges: boolean("has_changes").notNull().default(false),
     status: pageStatusEnum("status").notNull().default("draft"),
@@ -97,6 +138,7 @@ export const pages = pgTable(
   (t) => [
     index("pages_status_idx").on(t.status, t.publishedAt),
     uniqueIndex("pages_one_home").on(t.kind).where(sql`kind = 'home'`),
+    uniqueIndex("pages_translation_locale").on(t.translationOf, t.locale).where(sql`translation_of is not null`),
   ],
 );
 
@@ -310,3 +352,37 @@ export const pageComments = pgTable(
 );
 
 export type PageComment = typeof pageComments.$inferSelect;
+
+/** Who did what in the dashboard (and through MCP), newest first at /admin/activity. */
+export const activityLog = pgTable(
+  "activity_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** The actor's name at the time, so the entry survives a deleted account. */
+    actorName: text("actor_name").notNull(),
+    /** Dotted verb, e.g. "page.publish", "user.create", "auth.login_failed". */
+    action: text("action").notNull(),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    targetLabel: text("target_label"),
+    meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("activity_log_created_idx").on(t.createdAt),
+    index("activity_log_user_idx").on(t.userId, t.createdAt),
+    index("activity_log_target_idx").on(t.targetType, t.targetId),
+  ],
+);
+
+export type ActivityEntry = typeof activityLog.$inferSelect;
+
+/** Last result of checking a link found in published content (external URLs are fetched on demand). */
+export const linkChecks = pgTable("link_checks", {
+  url: text("url").primaryKey(),
+  ok: boolean("ok").notNull(),
+  status: integer("status"),
+  error: text("error"),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+});

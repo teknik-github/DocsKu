@@ -2,15 +2,17 @@
 
 import { redirect } from "next/navigation";
 import { updateTag } from "next/cache";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { logActivity, pageLabel, pageLabels } from "@/lib/activity";
 import { EMPTY_DOC } from "@/lib/content/doc";
 import { PLACEHOLDER_SLUG, slugify, uniqueSlug } from "@/lib/slug";
 import { NO_NAV, readNavigation, resolveSection, writeNavigation } from "@/lib/automation";
 import { findCategory, placePages } from "@/lib/categories";
 import { forgetRedirects, recordSlugChange } from "@/lib/redirects";
+import { slugLanguageError } from "@/lib/translations";
 import {
   NOT_FOUND,
   addRevision,
@@ -62,6 +64,7 @@ export async function createPage(formData?: FormData) {
     })
     .returning({ id: schema.pages.id });
   if (navigation && category) await writeNavigation(placePages(navigation, [page.id], category));
+  await logActivity({ user, action: "page.create", target: { type: "page", id: page.id, label: "Tanpa judul" }, meta: category ? { category } : undefined });
   redirect(`/admin/pages/${page.id}`);
 }
 
@@ -86,7 +89,16 @@ export async function publishPage(pageId: string, input: DraftInput, publishAt: 
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  return publishWorkingCopy(pageId, parsed.data, publishAt, user.id, updateTag);
+  const result = await publishWorkingCopy(pageId, parsed.data, publishAt, user.id, updateTag);
+  if (result.ok) {
+    await logActivity({
+      user,
+      action: result.status === "scheduled" ? "page.schedule" : "page.publish",
+      target: { type: "page", id: pageId, label: parsed.data.title || (await pageLabel(pageId)) },
+      meta: result.status === "scheduled" ? { publishAt: result.publishedAt, slug: result.slug } : { slug: result.slug },
+    });
+  }
+  return result;
 }
 
 /** Where the first publish puts the page in the navigation: a section id, "none", or null (automatic). */
@@ -96,7 +108,8 @@ export async function setNavSection(pageId: string, value: string | null) {
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const navSection = value === null || value === NO_NAV ? value : await resolveSection(value);
   if (value && !navSection) return { ok: false as const, error: "Bagian navigasi tidak ditemukan." };
-  await db.update(schema.pages).set({ navSection }).where(and(eq(schema.pages.id, pageId), eq(schema.pages.kind, "doc")));
+  // A translation takes its original's place in navigation and never gets its own.
+  await db.update(schema.pages).set({ navSection }).where(and(eq(schema.pages.id, pageId), eq(schema.pages.kind, "doc"), isNull(schema.pages.translationOf)));
   return { ok: true as const };
 }
 
@@ -105,7 +118,16 @@ export async function unpublishPage(pageId: string): Promise<SaveResult> {
   const user = await authorize();
   if ("error" in user) return { ok: false, error: user.error };
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
-  return unpublish(pageId, user.id, updateTag);
+  const [before] = await db.select({ status: schema.pages.status }).from(schema.pages).where(eq(schema.pages.id, pageId));
+  const result = await unpublish(pageId, user.id, updateTag);
+  if (result.ok && before && before.status !== "draft") {
+    await logActivity({
+      user,
+      action: before.status === "scheduled" ? "page.unschedule" : "page.unpublish",
+      target: { type: "page", id: pageId, label: await pageLabel(pageId) },
+    });
+  }
+  return result;
 }
 
 /** Discards unpublished edits by copying the live version back into the working copy. */
@@ -139,6 +161,9 @@ export async function updateSlug(pageId: string, value: string): Promise<{ ok: t
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const parsed = slugSchema.safeParse(value);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  // Translations stay under their language; originals keep out of a language's prefix.
+  const languageError = await slugLanguageError(pageId, parsed.data);
+  if (languageError) return { ok: false, error: languageError };
   const [taken] = await db
     .select({ id: schema.pages.id })
     .from(schema.pages)
@@ -158,6 +183,9 @@ export async function updateSlug(pageId: string, value: string): Promise<{ ok: t
   if (before.publishedAt && before.publishedAt <= new Date()) await recordSlugChange(pageId, before.slug, parsed.data);
   else forgetRedirects();
   if (page.status === "published") refreshPublicSite();
+  if (before.slug !== parsed.data) {
+    await logActivity({ user, action: "page.slug", target: { type: "page", id: pageId, label: await pageLabel(pageId) }, meta: { from: before.slug, to: parsed.data } });
+  }
   return { ok: true, slug: parsed.data };
 }
 
@@ -201,11 +229,13 @@ export async function deletePage(pageId: string) {
   if ("error" in user) return { ok: false as const, error: user.error };
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   // The home page can be unpublished but not deleted.
+  const label = await pageLabel(pageId);
   const [deleted] = await db
     .delete(schema.pages)
     .where(and(eq(schema.pages.id, pageId), eq(schema.pages.kind, "doc")))
-    .returning({ status: schema.pages.status });
+    .returning({ status: schema.pages.status, slug: schema.pages.slug });
   if (!deleted) return { ok: false as const, error: "Halaman tidak ditemukan atau tidak bisa dihapus." };
+  await logActivity({ user, action: "page.delete", target: { type: "page", id: pageId, label }, meta: { slug: deleted.slug, status: deleted.status } });
   await removeFromNavigation([pageId]);
   if (deleted.status === "published") refreshPublicSite();
   redirect("/admin/pages");
@@ -217,7 +247,14 @@ export async function deletePages(pageIds: string[]) {
   if ("error" in user) return { ok: false as const, error: user.error };
   const ids = z.array(z.uuid()).max(500).safeParse(pageIds);
   if (!ids.success || !ids.data.length) return { ok: false as const, error: "Tidak ada halaman dipilih." };
-  await db.delete(schema.pages).where(and(inArray(schema.pages.id, ids.data), eq(schema.pages.kind, "doc")));
+  const labels = await pageLabels(ids.data);
+  const deleted = await db
+    .delete(schema.pages)
+    .where(and(inArray(schema.pages.id, ids.data), eq(schema.pages.kind, "doc")))
+    .returning({ id: schema.pages.id, slug: schema.pages.slug });
+  for (const page of deleted) {
+    await logActivity({ user, action: "page.delete", target: { type: "page", id: page.id, label: labels.get(page.id) }, meta: { slug: page.slug, bulk: true } });
+  }
   await removeFromNavigation(ids.data);
   refreshPublicSite();
   return { ok: true as const };
@@ -253,6 +290,7 @@ export async function restoreRevision(pageId: string, revisionId: string) {
     })
     .where(eq(schema.pages.id, pageId));
   await addRevision(pageId, draft, "restore", user.id);
+  await logActivity({ user, action: "page.restore", target: { type: "page", id: pageId, label: draft.title || (await pageLabel(pageId)) }, meta: { revisionId, revisionAt: revision.createdAt.toISOString() } });
   return { ok: true as const, draft };
 }
 
@@ -281,10 +319,17 @@ export async function createDraftFromProposal(
   }
 
   const page = await createPageFromMarkdown(parsed.data, user.id, "ai");
+  await logActivity({ user, action: "page.create", target: { type: "page", id: page.id, label: parsed.data.title }, meta: { via: "ai" } });
   if (mode === "draft") return { ok: true, id: page.id, slug: page.slug, status: "draft" };
 
   const result = await publishWorkingCopy(page.id, page.draft, mode === "schedule" ? (publishAt ?? null) : null, user.id, updateTag);
   if (!result.ok) return { ok: false, error: `Draf dibuat, tetapi gagal diterbitkan: ${result.error}` };
+  await logActivity({
+    user,
+    action: result.status === "scheduled" ? "page.schedule" : "page.publish",
+    target: { type: "page", id: page.id, label: parsed.data.title },
+    meta: { via: "ai", slug: result.slug, ...(result.status === "scheduled" ? { publishAt: result.publishedAt } : {}) },
+  });
   return { ok: true, id: page.id, slug: result.slug, status: result.status, publishedAt: result.publishedAt };
 }
 
@@ -300,5 +345,6 @@ export async function setFeatured(pageId: string, featured: boolean) {
     .returning({ status: schema.pages.status });
   if (!page) return { ok: false as const, error: NOT_FOUND };
   if (page.status === "published") refreshPublicSite();
+  await logActivity({ user, action: featured ? "page.feature" : "page.unfeature", target: { type: "page", id: pageId, label: await pageLabel(pageId) } });
   return { ok: true as const };
 }

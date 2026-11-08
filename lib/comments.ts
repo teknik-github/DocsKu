@@ -21,7 +21,7 @@ async function publishedPageId(slug: string) {
   const [page] = await db
     .select({ id: schema.pages.id })
     .from(schema.pages)
-    .where(and(eq(schema.pages.slug, slug), eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc")));
+    .where(and(eq(schema.pages.slug, slug), eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"), eq(schema.pages.visibility, "public")));
   return page?.id ?? null;
 }
 
@@ -82,7 +82,7 @@ export async function addStaffComment(pageId: string, name: string, body: string
   const [page] = await db
     .select({ id: schema.pages.id })
     .from(schema.pages)
-    .where(and(eq(schema.pages.id, pageId), eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc")));
+    .where(and(eq(schema.pages.id, pageId), eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"), eq(schema.pages.visibility, "public")));
   if (!page) return false;
   await db.insert(schema.pageComments).values({ pageId, authorName: name, body, status: "approved", isStaff: true, approvedAt: sql`now()` });
   return true;
@@ -93,7 +93,7 @@ export async function listCommentablePages() {
   return db
     .select({ id: schema.pages.id, title: schema.pages.title, slug: schema.pages.slug })
     .from(schema.pages)
-    .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc")))
+    .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"), eq(schema.pages.visibility, "public")))
     .orderBy(asc(schema.pages.title));
 }
 
@@ -133,13 +133,31 @@ export async function deleteComment(id: string) {
   await db.delete(schema.pageComments).where(eq(schema.pageComments.id, id));
 }
 
-/** What the dashboard's Komentar tabs show: threads awaiting a team reply, or threads holding comments of one status. */
-export const COMMENT_VIEWS = ["unanswered", "pending", "approved", "spam"] as const;
-export type CommentView = (typeof COMMENT_VIEWS)[number];
+export async function deleteComments(ids: string[]) {
+  await db.delete(schema.pageComments).where(inArray(schema.pageComments.id, ids));
+}
 
-export type ThreadMessage = {
+/**
+ * The Komentar list (WordPress-style): "all" (not spam), "unanswered" (the
+ * newest message of each conversation whose last word is a visitor's),
+ * or one status.
+ */
+export const COMMENT_VIEWS = ["all", "unanswered", "pending", "approved", "spam"] as const;
+export type CommentView = (typeof COMMENT_VIEWS)[number];
+export const COMMENTS_PER_PAGE = 20;
+
+export type CommentRow = {
   id: string;
   parentId: string | null;
+  /** The comment this one answers, for "Membalas …" and the AI draft's context. */
+  parentName: string | null;
+  parentBody: string | null;
+  pageId: string;
+  pageTitle: string;
+  pageSlug: string;
+  pagePublished: boolean;
+  /** Approved comments on that page (the count bubble). */
+  pageComments: number;
   name: string;
   email: string | null;
   body: string;
@@ -147,76 +165,85 @@ export type ThreadMessage = {
   status: CommentStatus;
   createdAt: string;
 };
-export type CommentThread = {
-  id: string;
-  pageId: string;
-  pageTitle: string;
-  pageSlug: string;
-  pagePublished: boolean;
-  lastAt: string;
-  messages: ThreadMessage[];
-};
 
-/**
- * Whole conversations (a top-level comment and its replies) for the dashboard,
- * latest activity first. "unanswered": the newest non-spam message is a
- * visitor's. Otherwise: threads holding a comment with that status. Spam
- * messages only appear in the spam tab.
- */
-export async function listThreadsForAdmin(view: CommentView) {
+export async function listCommentRows({ view, pageId, query, page }: { view: CommentView; pageId?: string; query?: string; page: number }) {
+  const term = query?.trim() ? `%${query.trim().replace(/[%_\\]/g, "\\$&")}%` : null;
   const rows = await db.execute<{
     id: string;
     parent_id: string | null;
-    root: string;
+    parent_name: string | null;
+    parent_body: string | null;
     page_id: string;
     page_title: string;
     page_slug: string;
     page_published: boolean;
+    page_comments: number;
     author_name: string;
     author_email: string | null;
     body: string;
     is_staff: boolean;
     status: CommentStatus;
     created_at: Date | string;
+    total: number;
   }>(sql`
     with t as (select c.*, coalesce(c.parent_id, c.id) as root from page_comments c),
-    latest as (
-      select distinct on (root) root, is_staff from t where status <> 'spam' order by root, created_at desc
-    ),
-    roots as (
-      select t.root, max(t.created_at) as last_at from t
-      where ${
-        view === "unanswered"
-          ? sql`t.status <> 'spam' and t.root in (select root from latest where not is_staff)`
-          : sql`t.root in (select root from t where status = ${view})`
-      }
-      group by t.root order by last_at desc limit 100
-    )
-    select t.id, t.parent_id, t.root, t.page_id, p.title as page_title, p.slug as page_slug, (p.status = 'published') as page_published,
-      t.author_name, t.author_email, t.body, t.is_staff, t.status, t.created_at
-    from t join roots r on r.root = t.root join pages p on p.id = t.page_id
-    where ${view === "spam" ? sql`true` : sql`t.status <> 'spam'`}
-    order by r.last_at desc, t.created_at asc`);
-
-  const threads = new Map<string, CommentThread>();
-  for (const row of rows) {
-    const createdAt = new Date(row.created_at).toISOString();
-    let thread = threads.get(row.root);
-    if (!thread) {
-      thread = { id: row.root, pageId: row.page_id, pageTitle: row.page_title, pageSlug: row.page_slug, pagePublished: row.page_published, lastAt: createdAt, messages: [] };
-      threads.set(row.root, thread);
+    latest as (select distinct on (root) root, id, is_staff from t where status <> 'spam' order by root, created_at desc)
+    select t.id, t.parent_id, par.author_name as parent_name, par.body as parent_body,
+      t.page_id, p.title as page_title, p.slug as page_slug, (p.status = 'published') as page_published,
+      (select count(*) from page_comments x where x.page_id = t.page_id and x.status = 'approved')::int as page_comments,
+      t.author_name, t.author_email, t.body, t.is_staff, t.status, t.created_at,
+      (count(*) over ())::int as total
+    from t
+    join pages p on p.id = t.page_id
+    left join page_comments par on par.id = t.parent_id
+    where ${
+      view === "all"
+        ? sql`t.status <> 'spam'`
+        : view === "unanswered"
+          ? sql`t.id in (select id from latest where not is_staff)`
+          : sql`t.status = ${view}`
     }
-    if (createdAt > thread.lastAt) thread.lastAt = createdAt;
-    thread.messages.push({ id: row.id, parentId: row.parent_id, name: row.author_name, email: row.author_email, body: row.body, staff: row.is_staff, status: row.status, createdAt });
-  }
+      ${pageId ? sql`and t.page_id = ${pageId}` : sql``}
+      ${term ? sql`and (t.body ilike ${term} or t.author_name ilike ${term} or t.author_email ilike ${term})` : sql``}
+    order by t.created_at desc
+    limit ${COMMENTS_PER_PAGE} offset ${(page - 1) * COMMENTS_PER_PAGE}`);
 
   const [counts] = await db.execute<Record<CommentView, number>>(sql`
     with t as (select c.*, coalesce(c.parent_id, c.id) as root from page_comments c),
     latest as (select distinct on (root) root, is_staff from t where status <> 'spam' order by root, created_at desc)
     select
+      (select count(*) from page_comments where status <> 'spam')::int as all,
       (select count(*) from latest where not is_staff)::int as unanswered,
       (select count(*) from page_comments where status = 'pending')::int as pending,
       (select count(*) from page_comments where status = 'approved')::int as approved,
       (select count(*) from page_comments where status = 'spam')::int as spam`);
-  return { threads: [...threads.values()], counts: counts ?? { unanswered: 0, pending: 0, approved: 0, spam: 0 } };
+
+  const pages = await db.execute<{ id: string; title: string; n: number }>(sql`
+    select p.id, p.title, count(*)::int as n from page_comments c join pages p on p.id = c.page_id
+    group by p.id, p.title order by p.title`);
+
+  return {
+    rows: [...rows].map(
+      (r): CommentRow => ({
+        id: r.id,
+        parentId: r.parent_id,
+        parentName: r.parent_name,
+        parentBody: r.parent_body,
+        pageId: r.page_id,
+        pageTitle: r.page_title,
+        pageSlug: r.page_slug,
+        pagePublished: r.page_published,
+        pageComments: r.page_comments,
+        name: r.author_name,
+        email: r.author_email,
+        body: r.body,
+        staff: r.is_staff,
+        status: r.status,
+        createdAt: new Date(r.created_at).toISOString(),
+      }),
+    ),
+    total: rows[0]?.total ?? 0,
+    counts: counts ?? { all: 0, unanswered: 0, pending: 0, approved: 0, spam: 0 },
+    pages: [...pages],
+  };
 }

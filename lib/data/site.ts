@@ -1,6 +1,6 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { buildingWithoutDatabase, db, schema } from "@/db";
 import type { JSONContent } from "@tiptap/core";
 import { textOf, tocHeadings } from "@/lib/content/doc";
@@ -21,7 +21,10 @@ import type {
   PageCard,
   SearchEntry,
   SiteSettings,
+  WidgetSettings,
 } from "@/lib/site-types";
+import { DEFAULT_WIDGET } from "@/lib/widget";
+import { type Alternates, DEFAULT_LANGUAGES, type LanguageSettings } from "@/lib/i18n";
 
 /**
  * Public, cached reads. Every function is tagged, and dashboard mutations call
@@ -109,6 +112,23 @@ export async function getAskAiAvailable(): Promise<boolean> {
   return settings.enabled && settings.dailyLimit > 0 && ready;
 }
 
+/** Languages (settings key "languages", Pengaturan → Bahasa). Originals are in `defaultLocale`. */
+export async function getLanguageSettings(): Promise<LanguageSettings> {
+  "use cache";
+  cacheTag("settings");
+  cacheLife("max");
+  const stored = await readSetting<Partial<LanguageSettings>>("languages");
+  return { ...DEFAULT_LANGUAGES, ...stored, languages: stored?.languages ?? [] };
+}
+
+/** The embeddable help widget (settings key "widget", Pengaturan → Widget bantuan). */
+export async function getWidgetSettings(): Promise<WidgetSettings> {
+  "use cache";
+  cacheTag("settings");
+  cacheLife("max");
+  return { ...DEFAULT_WIDGET, ...(await readSetting<Partial<WidgetSettings>>("widget")) };
+}
+
 /**
  * Address of the generated cover for a published page, in the shape it is shown
  * at, so object-fit never crops its text: "card" (16:10 cards), "wide"
@@ -123,19 +143,38 @@ export function generatedCover(slug: string, shape: CoverShape, color: string) {
 async function getPublishedPageIndex() {
   if (buildingWithoutDatabase) return [];
   return db
-    .select({ id: schema.pages.id, slug: schema.pages.slug, title: schema.pages.title })
+    .select({ id: schema.pages.id, slug: schema.pages.slug, title: schema.pages.title, locale: schema.pages.locale, translationOf: schema.pages.translationOf })
     .from(schema.pages)
-    .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc")));
+    .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"), eq(schema.pages.visibility, "public")));
+}
+
+type IndexedPage = { id: string; slug: string; title: string; locale: string; translationOf: string | null };
+
+/**
+ * Original page id → the page shown for it in `locale`: the default language
+ * gets the originals; another language gets its published translation, or
+ * (with `missing: "fallback"`) the original.
+ */
+async function pagesForLocale(locale: string | undefined): Promise<Map<string, IndexedPage>> {
+  const [published, languages] = await Promise.all([getPublishedPageIndex(), getLanguageSettings()]);
+  const originals = published.filter((page) => !page.translationOf);
+  if (!locale || locale === languages.defaultLocale || !languages.languages.some((l) => l.code === locale)) {
+    return new Map(originals.map((page) => [page.id, page]));
+  }
+  const map = new Map<string, IndexedPage>(languages.missing === "fallback" ? originals.map((page) => [page.id, page]) : []);
+  for (const page of published) if (page.translationOf && page.locale === locale) map.set(page.translationOf, page);
+  return map;
 }
 
 function resolveItems(
   items: NavItemData[],
-  pagesById: Map<string, { slug: string; title: string }>,
+  pagesById: Map<string, { slug: string; title: string; translationOf?: string | null }>,
 ): NavItem[] {
   return items.flatMap((item): NavItem[] => {
     if (item.type === "page") {
       const page = pagesById.get(item.pageId);
-      return page ? [{ title: item.title || page.title, href: slugToHref(page.slug) }] : [];
+      // A custom label is written in the default language; a translation shows its own title.
+      return page ? [{ title: (!page.translationOf && item.title) || page.title, href: slugToHref(page.slug) }] : [];
     }
     if (item.type === "link") return [{ title: item.title, href: item.href }];
     const children = resolveItems(item.items, pagesById);
@@ -143,21 +182,21 @@ function resolveItems(
   });
 }
 
-/** Header tabs and sidebars, containing only published pages. */
-export async function getNavigation(): Promise<NavTab[]> {
+/**
+ * Header tabs and sidebars, containing only published pages. Without `locale`
+ * (or with the default language) the originals; otherwise each page's
+ * translation, with tab and section titles from their `titles[locale]`.
+ */
+export async function getNavigation(locale?: string): Promise<NavTab[]> {
   "use cache";
-  cacheTag("navigation", "pages");
+  cacheTag("navigation", "pages", "settings");
   cacheLife("max");
-  const [navigation, published] = await Promise.all([
-    readSetting<NavigationData>("navigation"),
-    getPublishedPageIndex(),
-  ]);
-  const pagesById = new Map(published.map((page) => [page.id, page]));
+  const [navigation, pagesById] = await Promise.all([readSetting<NavigationData>("navigation"), pagesForLocale(locale)]);
   return (navigation?.tabs ?? []).flatMap((tab) => {
     const sections = tab.sections
-      .map((section) => ({ title: section.title, image: section.image, items: resolveItems(section.items, pagesById) }))
+      .map((section) => ({ title: (locale && section.titles?.[locale]) || section.title, image: section.image, items: resolveItems(section.items, pagesById) }))
       .filter((section) => section.items.length > 0);
-    const resolved: NavTab = { title: tab.title, href: "", sections };
+    const resolved: NavTab = { title: (locale && tab.titles?.[locale]) || tab.title, href: "", sections };
     const first = tabPages(resolved)[0];
     return first ? [{ ...resolved, href: first.href }] : [];
   });
@@ -178,9 +217,11 @@ export async function getPublishedPage(slug: string) {
       coverImage: schema.pages.coverImage,
       publishedAt: schema.pages.publishedAt,
       updatedAt: schema.pages.updatedAt,
+      /** Shown as the article's author (lib/data/authors.ts): the creator, or the last editor for older pages. */
+      authorId: sql<string | null>`coalesce(${schema.pages.authorId}, ${schema.pages.updatedById})`,
     })
     .from(schema.pages)
-    .where(and(eq(schema.pages.slug, slug), eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc")));
+    .where(and(eq(schema.pages.slug, slug), eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"), eq(schema.pages.visibility, "public")));
   return page ?? null;
 }
 
@@ -204,13 +245,14 @@ export async function getPublishedSlugs(): Promise<string[]> {
   return (await getPublishedPageIndex()).map((page) => page.slug);
 }
 
-export async function getSearchIndex(): Promise<SearchEntry[]> {
+/** The search dialog's entries for one language (the default without `locale`). */
+export async function getSearchIndex(locale?: string): Promise<SearchEntry[]> {
   "use cache";
-  cacheTag("navigation", "pages");
+  cacheTag("navigation", "pages", "settings");
   cacheLife("max");
   if (buildingWithoutDatabase) return [];
   const [tabs, rows] = await Promise.all([
-    getNavigation(),
+    getNavigation(locale),
     db
       .select({
         slug: schema.pages.slug,
@@ -218,7 +260,7 @@ export async function getSearchIndex(): Promise<SearchEntry[]> {
         content: schema.pages.content,
       })
       .from(schema.pages)
-      .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"))),
+      .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"), eq(schema.pages.visibility, "public"))),
   ]);
   const bySlug = new Map(rows.map((row) => [slugToHref(row.slug), row]));
   return allPages(tabs).flatMap((page) => {
@@ -243,15 +285,21 @@ export function readingMinutes(doc: JSONContent) {
   return Math.max(1, Math.round(words / 200));
 }
 
-/** Card data (cover, excerpt, reading time, date) for every published docs page. */
-export async function getPageCards(): Promise<PageCard[]> {
+/**
+ * Card data (cover, excerpt, reading time, date) for every published docs page
+ * shown in one language: the originals without `locale`, otherwise that
+ * language's translations (plus untranslated originals with `missing: "fallback"`).
+ */
+export async function getPageCards(locale?: string): Promise<PageCard[]> {
   "use cache";
-  cacheTag("pages");
+  cacheTag("pages", "settings");
   cacheLife("max");
   if (buildingWithoutDatabase) return [];
-  const { cover: autoCover, coverColor } = await getAutomation();
-  const rows = await db
+  const [{ cover: autoCover, coverColor }, shown] = await Promise.all([getAutomation(), pagesForLocale(locale)]);
+  const wanted = new Set([...shown.values()].map((page) => page.id));
+  const all = await db
     .select({
+      id: schema.pages.id,
       slug: schema.pages.slug,
       title: schema.pages.title,
       description: schema.pages.description,
@@ -261,7 +309,8 @@ export async function getPageCards(): Promise<PageCard[]> {
       featured: schema.pages.featured,
     })
     .from(schema.pages)
-    .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc")));
+    .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"), eq(schema.pages.visibility, "public")));
+  const rows = all.filter((row) => wanted.has(row.id));
   return rows.map((row) => ({
     href: slugToHref(row.slug),
     title: row.title,
@@ -277,9 +326,9 @@ export async function getPageCards(): Promise<PageCard[]> {
  * Hrefs of the most read published docs pages over the last 30 days, most read first.
  * Views are counted without invalidating tags, so this refreshes hourly.
  */
-export async function getPopularPages(limit = 6): Promise<string[]> {
+export async function getPopularPages(limit = 6, locale?: string): Promise<string[]> {
   "use cache";
-  cacheTag("pages");
+  cacheTag("pages", "settings");
   cacheLife("hours");
   if (buildingWithoutDatabase) return [];
   const views = sql<number>`sum(${schema.pageViews.views})`;
@@ -291,6 +340,11 @@ export async function getPopularPages(limit = 6): Promise<string[]> {
       and(
         eq(schema.pages.status, "published"),
         eq(schema.pages.kind, "doc"),
+        eq(schema.pages.visibility, "public"),
+        // Originals for the default language, otherwise that language's translations.
+        locale && locale !== (await getLanguageSettings()).defaultLocale
+          ? and(eq(schema.pages.locale, locale), sql`${schema.pages.translationOf} is not null`)
+          : isNull(schema.pages.translationOf),
         gte(schema.pageViews.day, sql`(now() at time zone 'Asia/Jakarta')::date - 30`),
       ),
     )
@@ -298,4 +352,31 @@ export async function getPopularPages(limit = 6): Promise<string[]> {
     .orderBy(desc(views))
     .limit(limit);
   return rows.map((row) => slugToHref(row.slug));
+}
+
+/**
+ * Every published public page that has translations, mapped to all versions
+ * of it by language ({ id: "/docs/x", en: "/docs/en/x" }), for the language
+ * switcher and hreflang. Pages without translations are left out.
+ */
+export async function getTranslationAlternates(): Promise<Record<string, Alternates>> {
+  "use cache";
+  cacheTag("pages", "settings");
+  cacheLife("max");
+  const [published, languages] = await Promise.all([getPublishedPageIndex(), getLanguageSettings()]);
+  if (!languages.languages.length) return {};
+  const enabled = new Set(languages.languages.map((l) => l.code));
+  const byId = new Map(published.map((page) => [page.id, page]));
+  const groups = new Map<string, Alternates>();
+  for (const page of published) {
+    if (!page.translationOf || !enabled.has(page.locale)) continue;
+    const original = byId.get(page.translationOf);
+    if (!original) continue;
+    const group = groups.get(original.id) ?? { [languages.defaultLocale]: slugToHref(original.slug) };
+    group[page.locale] = slugToHref(page.slug);
+    groups.set(original.id, group);
+  }
+  const result: Record<string, Alternates> = {};
+  for (const group of groups.values()) for (const href of Object.values(group)) result[href] = group;
+  return result;
 }

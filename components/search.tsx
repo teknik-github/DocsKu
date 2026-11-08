@@ -6,8 +6,10 @@ import { useRouter } from "next/navigation";
 import { CornerDownLeft, FileText, Hash, Search, Sparkles } from "lucide-react";
 import type { SearchEntry } from "@/lib/site-types";
 import { beacon } from "@/components/reader-footer";
+import { useSite } from "@/components/site-context";
+import { t } from "@/lib/i18n";
 
-type Result = {
+export type Result = {
   href: string;
   title: string;
   context: string;
@@ -32,7 +34,7 @@ function reportQuery(pending: { current: PendingQuery }, reported: Set<string>) 
   beacon("/api/track", { type: "search", query, found: item.found });
 }
 
-function search(index: SearchEntry[], query: string): Result[] {
+export function search(index: SearchEntry[], query: string): Result[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) {
     return index.map((entry) => ({
@@ -71,15 +73,20 @@ function search(index: SearchEntry[], query: string): Result[] {
 
 export function SearchProvider({
   index,
+  indexes,
   ai = false,
   children,
 }: {
   index: SearchEntry[];
+  /** Entries per extra language; the path picks one (/docs/<code>/…). */
+  indexes?: Record<string, SearchEntry[]>;
   /** Offer "Tanya AI" (an answer from the docs) above the results. */
   ai?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const { locale } = useSite();
+  const localeIndex = indexes?.[locale] ?? index;
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -95,12 +102,12 @@ export function SearchProvider({
   return (
     <SearchContext value={() => setOpen(true)}>
       {children}
-      {open && <SearchDialog index={index} ai={ai} onClose={() => setOpen(false)} />}
+      {open && <SearchDialog index={localeIndex} ai={ai} locale={locale} onClose={() => setOpen(false)} />}
     </SearchContext>
   );
 }
 
-function SearchDialog({ index, ai, onClose }: { index: SearchEntry[]; ai: boolean; onClose: () => void }) {
+function SearchDialog({ index, ai, locale, onClose }: { index: SearchEntry[]; ai: boolean; locale: string; onClose: () => void }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -176,7 +183,7 @@ function SearchDialog({ index, ai, onClose }: { index: SearchEntry[]; ai: boolea
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Cari dokumentasi"
+        aria-label={t(locale, "searchLabel")}
         className="w-full max-w-xl overflow-hidden rounded-2xl border border-line bg-surface shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -191,7 +198,7 @@ function SearchDialog({ index, ai, onClose }: { index: SearchEntry[]; ai: boolea
               setAsked(null);
             }}
             onKeyDown={onKeyDown}
-            placeholder={ai ? "Cari atau tanyakan sesuatu…" : "Cari dokumentasi…"}
+            placeholder={t(locale, ai ? "searchOrAsk" : "searchDocs")}
             className="h-12 w-full bg-transparent text-sm text-fg outline-none placeholder:text-fg-subtle"
           />
           <kbd className="rounded border border-line px-1.5 py-0.5 font-sans text-[11px] text-fg-subtle">
@@ -199,7 +206,7 @@ function SearchDialog({ index, ai, onClose }: { index: SearchEntry[]; ai: boolea
           </kbd>
         </div>
         {asked !== null ? (
-          <AskAnswer key={asked} question={asked} onBack={() => setAsked(null)} onNavigate={navigate} />
+          <AskAnswer key={asked} question={asked} locale={locale} onBack={() => setAsked(null)} onNavigate={navigate} />
         ) : (
         <ul ref={listRef} className="max-h-[60vh] overflow-y-auto p-2">
           {canAsk && (
@@ -216,9 +223,9 @@ function SearchDialog({ index, ai, onClose }: { index: SearchEntry[]; ai: boolea
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-fg">
-                    Tanya AI: <span className="font-medium">“{query.trim()}”</span>
+                    {t(locale, "askAi")}: <span className="font-medium">“{query.trim()}”</span>
                   </span>
-                  <span className="block truncate text-xs text-fg-subtle">Jawaban langsung dari isi dokumentasi</span>
+                  <span className="block truncate text-xs text-fg-subtle">{t(locale, "askAiHint")}</span>
                 </span>
                 {active === 0 && <CornerDownLeft className="size-3.5 shrink-0 text-fg-subtle" />}
               </button>
@@ -226,7 +233,7 @@ function SearchDialog({ index, ai, onClose }: { index: SearchEntry[]; ai: boolea
           )}
           {results.length === 0 && (
             <li className="px-3 py-8 text-center text-sm text-fg-subtle">
-              {canAsk ? "Tidak ada judul yang cocok. Pilih Tanya AI untuk mencari di isi dokumentasi." : `Tidak ada hasil untuk “${query}”.`}
+              {canAsk ? t(locale, "askAiNoTitle") : t(locale, "noResults", { q: query })}
             </li>
           )}
           {results.map((result, j) => {
@@ -263,8 +270,9 @@ function SearchDialog({ index, ai, onClose }: { index: SearchEntry[]; ai: boolea
   );
 }
 
-export function SearchField({ className = "", label = "Cari" }: { className?: string; label?: string }) {
+export function SearchField({ className = "", label }: { className?: string; label?: React.ReactNode }) {
   const openSearch = use(SearchContext);
+  const { locale } = useSite();
   return (
     <button
       type="button"
@@ -272,7 +280,7 @@ export function SearchField({ className = "", label = "Cari" }: { className?: st
       className={`flex h-9 w-full items-center gap-2 rounded-lg border border-line bg-surface/60 px-3 text-sm text-fg-subtle transition-colors hover:border-line-strong ${className}`}
     >
       <Search className="size-4" />
-      <span className="flex-1 truncate text-left">{label}</span>
+      <span className="flex-1 truncate text-left">{label ?? t(locale, "search")}</span>
       <kbd className="flex items-center gap-0.5 font-sans text-[11px]">
         <span className="rounded border border-line px-1">Ctrl</span>
         <span className="rounded border border-line px-1">K</span>
@@ -283,11 +291,12 @@ export function SearchField({ className = "", label = "Cari" }: { className?: st
 
 export function SearchIconButton() {
   const openSearch = use(SearchContext);
+  const { locale } = useSite();
   return (
     <button
       type="button"
       onClick={openSearch}
-      aria-label="Cari"
+      aria-label={t(locale, "search")}
       className="inline-flex size-8 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-fill hover:text-fg"
     >
       <Search className="size-4" />

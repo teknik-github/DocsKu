@@ -18,7 +18,10 @@ import {
   ThumbsUp,
   TrendingUp,
   type LucideIcon,
+  CalendarCheck,
+  Link2Off,
 } from "lucide-react";
+import { countBrokenLinks } from "@/lib/review";
 import { createPage } from "@/app/admin/_actions/pages";
 import { requireUser } from "@/lib/auth/dal";
 import { getNavCounts, getPageStats, listPages, listScheduledPages, readSettingForAdmin } from "@/lib/data/admin";
@@ -30,6 +33,7 @@ import { db, schema } from "@/db";
 import { count } from "drizzle-orm";
 import { formatDateTime } from "@/components/admin/format";
 import { SetupChecklist, type SetupStep } from "@/components/admin/setup-checklist";
+import { twoFactorStatus } from "@/lib/auth/two-factor";
 import { Panel, StatusBadge, buttonClass } from "@/components/admin/ui";
 
 export const metadata = { title: "Dasbor" };
@@ -103,11 +107,14 @@ async function Dashboard() {
   const change = overview.previous ? Math.round(((overview.views - overview.previous) / overview.previous) * 100) : null;
   const votes = overview.helpful + overview.unhelpful;
   const categories = navigation.tabs.reduce((n, tab) => n + tab.sections.length, 0);
+  const brokenLinks = await countBrokenLinks();
 
   const attention: { icon: LucideIcon; text: string; href: string; tone: "accent" | "plain" }[] = [
     counts.comments && { icon: MessageSquare, text: `${counts.comments} komentar menunggu persetujuan`, href: "/admin/comments?view=pending", tone: "accent" as const },
     counts.feedback && { icon: MessageSquareText, text: `${counts.feedback} pesan pembaca belum ditangani`, href: "/admin/stats", tone: "accent" as const },
     unpublishedChanges && { icon: FilePen, text: `${unpublishedChanges} halaman terbit punya perubahan yang belum diterbitkan`, href: "/admin/pages?status=published", tone: "plain" as const },
+    counts.review && { icon: CalendarCheck, text: `${counts.review} halaman sudah waktunya ditinjau ulang`, href: "/admin/review", tone: "plain" as const },
+    brokenLinks && { icon: Link2Off, text: `${brokenLinks} tautan rusak di halaman yang terbit`, href: "/admin/review?tab=tautan", tone: "plain" as const },
     asks.missed && { icon: Sparkles, text: `${asks.missed} pertanyaan Tanya AI tidak terjawab dokumentasi (7 hari)`, href: "/admin/stats?range=7", tone: "plain" as const },
     searches.missed && { icon: SearchX, text: `${searches.missed} pencarian tanpa hasil (7 hari)`, href: "/admin/stats?range=7", tone: "plain" as const },
   ].filter((item): item is Exclude<typeof item, 0 | false> => Boolean(item));
@@ -118,6 +125,7 @@ async function Dashboard() {
     { label: "Terbitkan halaman pertama", hint: "Tulis lalu klik Terbitkan.", href: "/admin/pages", done: stats.published > 0 },
     { label: "Susun beranda", hint: "Atur bagian beranda lalu terbitkan.", href: "/admin/home", done: Array.isArray(home?.sections) },
     { label: "Tambah anggota tim", hint: "Undang editor atau admin lain.", href: "/admin/users", done: users[0].total > 1 },
+    { label: "Aktifkan verifikasi dua langkah", hint: "Lindungi akun admin dengan kode dari ponsel.", href: "/admin/profile#2fa", done: admin ? (await twoFactorStatus(user.id)).enabled : true },
   ];
 
   return (

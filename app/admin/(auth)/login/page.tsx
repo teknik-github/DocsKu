@@ -26,6 +26,11 @@ async function LoginGate({ searchParams }: Pick<PageProps<"/admin/login">, "sear
   if (await getCurrentUser()) redirect("/admin");
   const [{ total }] = await db.select({ total: count() }).from(schema.users);
   if (total === 0) redirect("/admin/setup");
-  const { next } = await searchParams;
-  return <LoginForm next={typeof next === "string" ? next : undefined} />;
+  const { next, habis } = await searchParams;
+  return (
+    <LoginForm
+      next={typeof next === "string" ? next : undefined}
+      notice={habis ? "Verifikasi dua langkah berakhir (waktu habis atau terlalu banyak kode salah). Masukkan email dan password lagi." : undefined}
+    />
+  );
 }

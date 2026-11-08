@@ -1,6 +1,6 @@
 import "server-only";
 import type { JSONContent } from "@tiptap/core";
-import { and, desc, eq, notInArray } from "drizzle-orm";
+import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { mdxToDoc } from "@/lib/content/mdx-to-doc";
@@ -174,7 +174,7 @@ export async function publishWorkingCopy(
   // A scheduled page keeps its working copy; the scheduler copies it when due.
   const live =
     status === "published"
-      ? { title: draft.title, description: draft.description, content: draft.content, seo: draft.seo, coverImage: draft.cover ?? null, hasChanges: false }
+      ? { title: draft.title, description: draft.description, content: draft.content, seo: draft.seo, coverImage: draft.cover ?? null, hasChanges: false, reviewedAt: sql`now()` }
       : {};
   const [saved] = await db
     .update(schema.pages)

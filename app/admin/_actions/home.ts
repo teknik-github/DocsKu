@@ -4,6 +4,7 @@ import { updateTag } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { logActivity } from "@/lib/activity";
 import { homeSectionsSchema } from "@/lib/home-schema";
 import type { HomeSection } from "@/lib/site-types";
 
@@ -46,6 +47,7 @@ export async function publishHome(sections: HomeSection[]): Promise<Result> {
   await put("home", checked.sections);
   await db.delete(schema.settings).where(eq(schema.settings.key, "home_draft"));
   updateTag("settings");
+  await logActivity({ user, action: "home.publish", target: { type: "home", label: "Beranda" }, meta: { sections: checked.sections.length } });
   return { ok: true };
 }
 
@@ -53,5 +55,6 @@ export async function discardHomeDraft(): Promise<Result> {
   const user = await authorize();
   if ("error" in user) return { ok: false, error: user.error };
   await db.delete(schema.settings).where(eq(schema.settings.key, "home_draft"));
+  await logActivity({ user, action: "home.discard", target: { type: "home", label: "Beranda" } });
   return { ok: true };
 }

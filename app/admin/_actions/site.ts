@@ -7,10 +7,12 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { logActivity } from "@/lib/activity";
 import { STORED_NAME, uploadPath } from "@/lib/media";
 import { isCoverColor } from "@/lib/cover-palette";
 import { COLOR_THEME_IDS } from "@/lib/color-themes";
 import { isCategoryImage } from "@/lib/categories";
+import { DOCS_LAYOUT_IDS } from "@/lib/docs-layouts";
 import type { AutomationSettings, DocsLayout, NavigationData, SiteSettings } from "@/lib/site-types";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -26,7 +28,7 @@ const label = z.string().trim().min(1, "Judul wajib diisi.").max(120);
 const link = z.object({ title: label, href, description: z.string().trim().max(200).optional() });
 
 const siteSchema = z.object({
-  layout: z.enum(["docs", "hybrid", "ghost"]).default("docs"),
+  layout: z.enum(DOCS_LAYOUT_IDS).default("docs"),
   name: z.string().trim().min(1, "Nama situs wajib diisi.").max(60),
   description: z.string().trim().max(300),
   headerCta: z.object({ title: label, href }).nullable(),
@@ -54,16 +56,23 @@ export async function saveSiteSettings(input: SiteSettings): Promise<Result> {
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   // The layout and colours are chosen on the Tema page; keep whatever is active.
   const stored = await readSite();
-  await writeSite({ ...parsed.data, layout: stored.layout ?? "docs", ...(stored.colorTheme ? { colorTheme: stored.colorTheme } : {}) });
+  await writeSite({
+    ...parsed.data,
+    layout: stored.layout ?? "docs",
+    ...(stored.colorTheme ? { colorTheme: stored.colorTheme } : {}),
+    ...(stored.showAuthors !== undefined ? { showAuthors: stored.showAuthors } : {}),
+  });
+  await logActivity({ user, action: "settings.save", target: { type: "settings", id: "umum", label: "Umum" } });
   return { ok: true };
 }
 
 export async function saveTheme(layout: DocsLayout): Promise<Result> {
   const user = await authorize("admin");
   if ("error" in user) return { ok: false, error: user.error };
-  const parsed = z.enum(["docs", "hybrid", "ghost"]).safeParse(layout);
+  const parsed = z.enum(DOCS_LAYOUT_IDS).safeParse(layout);
   if (!parsed.success) return { ok: false, error: "Tema tidak dikenal." };
   await writeSite({ ...(await readSite()), layout: parsed.data });
+  await logActivity({ user, action: "theme.layout", target: { type: "theme", id: parsed.data, label: parsed.data } });
   return { ok: true };
 }
 
@@ -74,6 +83,18 @@ export async function saveColorTheme(colorTheme: string): Promise<Result> {
   const parsed = z.enum(COLOR_THEME_IDS).safeParse(colorTheme);
   if (!parsed.success) return { ok: false, error: "Tema warna tidak dikenal." };
   await writeSite({ ...(await readSite()), colorTheme: parsed.data });
+  await logActivity({ user, action: "theme.color", target: { type: "theme", id: parsed.data, label: parsed.data } });
+  return { ok: true };
+}
+
+/** Tema → Penulis: the byline, the author box and /penulis pages. */
+export async function saveShowAuthors(show: boolean): Promise<Result> {
+  const user = await authorize("admin");
+  if ("error" in user) return { ok: false, error: user.error };
+  if (typeof show !== "boolean") return { ok: false, error: "Pilihan tidak valid." };
+  await writeSite({ ...(await readSite()), showAuthors: show });
+  updateTag("authors");
+  await logActivity({ user, action: "theme.authors", target: { type: "theme", id: "authors", label: show ? "tampil" : "disembunyikan" }, meta: { show } });
   return { ok: true };
 }
 
@@ -99,6 +120,7 @@ export async function saveAutomation(input: AutomationSettings): Promise<Result>
   // Generated covers show up on cards, so the cached pages change too.
   updateTag("settings");
   updateTag("pages");
+  await logActivity({ user, action: "settings.save", target: { type: "settings", id: "otomatisasi", label: "Otomatisasi" } });
   return { ok: true };
 }
 
@@ -117,14 +139,24 @@ const navItem: z.ZodType<NavItemInput> = z.lazy(() =>
   ]),
 );
 
+/** Tab and section titles in other languages: { en: "Guides" }. Empty values are dropped. */
+const titlesSchema = z
+  .record(z.string().regex(/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/), z.string().trim().max(80))
+  .optional()
+  .transform((titles) => {
+    const kept = Object.entries(titles ?? {}).filter(([, title]) => title);
+    return kept.length ? Object.fromEntries(kept) : undefined;
+  });
+
 const navigationSchema = z.object({
   tabs: z
     .array(
       z.object({
         id: z.string().max(64).optional(),
         title: label,
+        titles: titlesSchema,
         sections: z
-          .array(z.object({ id: z.string().max(64).optional(), title: label, image: categoryImage.optional(), items: z.array(navItem).max(200) }))
+          .array(z.object({ id: z.string().max(64).optional(), title: label, titles: titlesSchema, image: categoryImage.optional(), items: z.array(navItem).max(200) }))
           .max(50),
       }),
     )
@@ -140,9 +172,11 @@ export async function saveNavigation(input: NavigationData): Promise<Result> {
     tabs: parsed.data.tabs.map((tab) => ({
       id: tab.id || randomUUID(),
       title: tab.title,
+      ...(tab.titles ? { titles: tab.titles } : {}),
       sections: tab.sections.map((section) => ({
         id: section.id || randomUUID(),
         title: section.title,
+        ...(section.titles ? { titles: section.titles } : {}),
         // The category image is set in Halaman; keep it through navigation edits.
         ...(section.image ? { image: section.image } : {}),
         items: section.items,
@@ -154,6 +188,7 @@ export async function saveNavigation(input: NavigationData): Promise<Result> {
     .values({ key: "navigation", value })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value } });
   updateTag("navigation");
+  await logActivity({ user, action: "navigation.save", target: { type: "navigation", label: "Navigasi" } });
   return { ok: true };
 }
 
@@ -162,8 +197,9 @@ export async function deleteMedia(id: string): Promise<Result> {
   const user = await authorize();
   if ("error" in user) return { ok: false, error: user.error };
   if (!z.uuid().safeParse(id).success) return { ok: false, error: "Media tidak ditemukan." };
-  const [row] = await db.delete(schema.media).where(eq(schema.media.id, id)).returning({ filename: schema.media.filename });
+  const [row] = await db.delete(schema.media).where(eq(schema.media.id, id)).returning({ filename: schema.media.filename, originalName: schema.media.originalName });
   if (!row) return { ok: false, error: "Media tidak ditemukan." };
+  await logActivity({ user, action: "media.delete", target: { type: "media", id, label: row.originalName }, meta: { file: row.filename } });
   if (STORED_NAME.test(row.filename)) {
     await unlink(uploadPath(row.filename)).catch(() => {});
   }

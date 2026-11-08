@@ -4,9 +4,11 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  CalendarCheck,
   ChartColumn,
   ExternalLink,
   FileText,
+  History,
   House,
   Image as ImageIcon,
   LayoutDashboard,
@@ -21,7 +23,6 @@ import {
   Plus,
   Settings,
   Signpost,
-  UserRound,
   Users,
   X,
   type LucideIcon,
@@ -31,9 +32,10 @@ import { createPage } from "@/app/admin/_actions/pages";
 import { ThemeToggle } from "@/components/theme";
 import type { SessionUser } from "@/lib/auth/dal";
 import { SIDEBAR_COOKIE } from "@/lib/sidebar-cookie";
+import { Avatar } from "@/components/avatar";
 
 
-export type NavCounts = { comments: number; feedback: number; drafts: number };
+export type NavCounts = { comments: number; feedback: number; drafts: number; review: number };
 
 type Item = {
   href: string;
@@ -57,6 +59,12 @@ const GROUPS: Group[] = [
         label: "Halaman",
         icon: FileText,
         badge: (c) => (c.drafts ? { value: c.drafts, hint: `${c.drafts} draf atau perubahan belum terbit`, quiet: true } : null),
+      },
+      {
+        href: "/admin/review",
+        label: "Tinjauan",
+        icon: CalendarCheck,
+        badge: (c) => (c.review ? { value: c.review, hint: `${c.review} halaman perlu ditinjau`, quiet: true } : null),
       },
       { href: "/admin/media", label: "Media", icon: ImageIcon },
       { href: "/admin/ai", label: "AI Chat", icon: MessageSquareText },
@@ -87,6 +95,7 @@ const GROUPS: Group[] = [
       { href: "/admin/navigation", label: "Navigasi", icon: ListTree },
       { href: "/admin/redirects", label: "Redirect", icon: Signpost },
       { href: "/admin/users", label: "Pengguna", icon: Users },
+      { href: "/admin/activity", label: "Aktivitas", icon: History },
       { href: "/admin/settings", label: "Pengaturan", icon: Settings, also: ["/admin/mcp"] },
     ],
   },
@@ -107,7 +116,7 @@ function SidebarContent({
   onToggle,
   onNavigate,
 }: {
-  user: SessionUser;
+  user: SessionUser & { avatar?: string | null };
   counts: NavCounts;
   siteName: string;
   collapsed?: boolean;
@@ -225,7 +234,7 @@ function SidebarContent({
               title={`${user.name} · ${ROLE_LABEL[user.role]}`}
               className="flex h-9 items-center justify-center rounded-lg text-fg-muted hover:bg-fill/70 hover:text-fg"
             >
-              <UserRound className="size-4" />
+              <Avatar name={user.name} src={user.avatar} size={28} />
             </Link>
             <div className="flex justify-center">
               <ThemeToggle />
@@ -239,9 +248,7 @@ function SidebarContent({
         ) : (
           <div className="flex items-center gap-2 rounded-lg px-3 py-2">
             <Link href="/admin/profile" onClick={onNavigate} className="group flex min-w-0 flex-1 items-center gap-2.5">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-fill text-fg-muted group-hover:text-fg">
-                <UserRound className="size-4" />
-              </span>
+              <Avatar name={user.name} src={user.avatar} size={32} className="ring-line group-hover:ring-2" />
               <span className="min-w-0">
                 <span className="block truncate text-sm text-fg">{user.name}</span>
                 <span className="block text-xs text-fg-subtle">{ROLE_LABEL[user.role]}</span>
@@ -262,8 +269,8 @@ function SidebarContent({
 
 /** Dashboard pages that use the full width and height instead of the centered column. */
 const FULL_BLEED = ["/admin/ai", "/admin/home"];
-/** Pages that use the full width: the page list (categories left, articles right). */
-const WIDE = ["/admin/pages"];
+/** Pages that use the full width: the page list (categories left, articles right) and the comment, review and activity tables. */
+const WIDE = ["/admin/pages", "/admin/comments", "/admin/review", "/admin/activity"];
 
 export function AdminShell({
   user,
@@ -272,7 +279,7 @@ export function AdminShell({
   collapsed: initialCollapsed,
   children,
 }: {
-  user: SessionUser;
+  user: SessionUser & { avatar?: string | null };
   counts: NavCounts;
   siteName: string;
   collapsed: boolean;

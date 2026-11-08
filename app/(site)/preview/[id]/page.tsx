@@ -7,8 +7,10 @@ import { getCurrentUser } from "@/lib/auth/dal";
 import { getPageForEditor } from "@/lib/data/admin";
 import { DocArticle, DocSkeleton } from "@/components/doc-article";
 import { HomeArticle } from "@/components/home-article";
-import { GhostArticle, HybridArticle } from "@/components/publication/articles";
-import { getNavigation, getPageCards, getSiteSettings, readingMinutes } from "@/lib/data/site";
+import { PublicationArticle } from "@/components/publication/registry";
+import { getNavigation, getSiteSettings, readingMinutes } from "@/lib/data/site";
+import { getAuthor } from "@/lib/data/authors";
+import { AuthorBox } from "@/components/author";
 
 export const metadata: Metadata = { title: "Pratinjau", robots: { index: false, follow: false } };
 
@@ -44,10 +46,13 @@ async function Preview({ params }: Pick<PageProps<"/preview/[id]">, "params">) {
   if (page.kind === "home") return <HomeArticle doc={page.draftContent} banner={banner} />;
 
   // Preview with the layout visitors will see.
-  const [site, tabs] = await Promise.all([getSiteSettings(), getNavigation()]);
+  // A translation previews with its language's navigation.
+  const locale = page.translationOf ? page.locale : undefined;
+  const [site, tabs] = await Promise.all([getSiteSettings(), getNavigation(locale)]);
   const layout = site.layout ?? "docs";
+  const author = site.showAuthors === false ? null : await getAuthor(page.authorId ?? page.updatedById);
+  const footer = <AuthorBox author={author} />;
   if (layout !== "docs") {
-    const cards = new Map((await getPageCards()).map((card) => [card.href, card]));
     const article = {
       href: `/docs/${page.slug}`,
       title: page.draftTitle || "Tanpa judul",
@@ -56,21 +61,24 @@ async function Preview({ params }: Pick<PageProps<"/preview/[id]">, "params">) {
       cover: page.draftCoverImage,
       publishedAt: page.publishedAt?.toISOString() ?? null,
       readingMinutes: readingMinutes(page.draftContent),
+      author,
     };
-    return layout === "ghost" ? (
-      <GhostArticle article={article} tabs={tabs} cards={cards} banner={banner} />
-    ) : (
-      <HybridArticle article={article} tabs={tabs} cards={cards} banner={banner} />
+    return (
+      <div lang={locale}>
+        <PublicationArticle layout={layout} article={article} tabs={tabs} banner={banner} footer={footer} locale={locale} />
+      </div>
     );
   }
 
   return (
-    <div className="lg:px-8">
+    <div className="lg:px-8" lang={locale}>
       <DocArticle
         title={page.draftTitle || "Tanpa judul"}
         description={page.draftDescription}
         doc={page.draftContent}
         banner={banner}
+        footer={footer}
+        author={author}
       />
     </div>
   );

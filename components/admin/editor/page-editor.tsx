@@ -61,6 +61,7 @@ export type EditorPage = {
   seo: PageSeo;
   cover: string | null;
   featured: boolean;
+  visibility: "public" | "internal";
   updatedAt: string;
 };
 
@@ -677,6 +678,7 @@ export function PageEditor({
           revisions={revisions}
           onSlugChange={setSlug}
           featured={page.featured}
+          visibility={page.visibility}
           navigation={navigation}
           aiEnabled={aiEnabled}
           seo={seo}

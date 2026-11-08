@@ -40,6 +40,9 @@ async function searchPages(query: string) {
       title: schema.pages.draftTitle,
       slug: schema.pages.slug,
       status: schema.pages.status,
+      visibility: schema.pages.visibility,
+      locale: schema.pages.locale,
+      translationOf: schema.pages.translationOf,
       description: schema.pages.draftDescription,
       content: schema.pages.draftContent,
     })
@@ -67,7 +70,17 @@ async function searchPages(query: string) {
       const snippet = at === Infinity ? body.slice(0, 160) : body.slice(Math.max(0, at - 60), at + 160);
       return {
         score: score * (matched / wanted.length),
-        page: { title: row.title || "Tanpa judul", slug: row.slug, status: row.status, description: row.description, snippet: snippet.replace(/\s+/g, " ").trim() },
+        page: {
+          title: row.title || "Tanpa judul",
+          slug: row.slug,
+          status: row.status,
+          // Internal pages are readable only by signed-in team members.
+          ...(row.visibility === "internal" ? { internal: true } : {}),
+          // A translation of another page (its language).
+          ...(row.translationOf ? { translation: row.locale } : {}),
+          description: row.description,
+          snippet: snippet.replace(/\s+/g, " ").trim(),
+        },
       };
     })
     .filter((r) => r.score > 0)

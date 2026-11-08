@@ -6,6 +6,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { logActivity } from "@/lib/activity";
 import { readNavigation, writeNavigation } from "@/lib/automation";
 import { findCategory, isCategoryImage, placePages } from "@/lib/categories";
 
@@ -47,6 +48,7 @@ export async function createCategory(input: z.input<typeof createSchema>): Promi
   }
   await writeNavigation({ tabs });
   updateTag("navigation");
+  await logActivity({ user, action: "category.create", target: { type: "category", id: section.id, label: name } });
   return { ok: true, id: section.id };
 }
 
@@ -68,6 +70,7 @@ export async function renameCategory(sectionId: string, newTitle: string): Promi
     })),
   });
   updateTag("navigation");
+  await logActivity({ user, action: "category.rename", target: { type: "category", id: sectionId, label: parsed.data }, meta: { from: found.section.title } });
   return { ok: true };
 }
 
@@ -93,6 +96,7 @@ export async function deleteCategory(sectionId: string): Promise<Result> {
       .filter((tab) => tab.sections.length > 0),
   });
   updateTag("navigation");
+  await logActivity({ user, action: "category.delete", target: { type: "category", id: sectionId, label: found.section.title } });
   return { ok: true };
 }
 
@@ -116,6 +120,12 @@ export async function movePagesToCategory(pageIds: string[], sectionId: string |
   // "none" keeps automation from putting an uncategorised page back on its first publish.
   await db.update(schema.pages).set({ navSection: sectionId ?? "none" }).where(inArray(schema.pages.id, ids));
   updateTag("navigation");
+  await logActivity({
+    user,
+    action: "category.move",
+    target: sectionId ? { type: "category", id: sectionId, label: findCategory(navigation, sectionId)?.section.title } : undefined,
+    meta: { count: ids.length, pageIds: ids.slice(0, 50) },
+  });
   return { ok: true };
 }
 
@@ -138,5 +148,6 @@ export async function setCategoryImage(sectionId: string, image: string | null):
     })),
   });
   updateTag("navigation");
+  await logActivity({ user, action: image ? "category.image" : "category.image_remove", target: { type: "category", id: sectionId, label: findCategory(navigation, sectionId)?.section.title } });
   return { ok: true };
 }

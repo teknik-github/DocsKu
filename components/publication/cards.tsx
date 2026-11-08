@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Star } from "lucide-react";
-import { formatDate } from "@/lib/format";
 import { stableHash } from "@/lib/cover-palette";
 import type { PageCard } from "@/lib/site-types";
+import { LocalDate, T } from "@/components/locale-text";
 
 /** The page's cover image, or a generated one (tinted pattern with the title's initial). */
 export function CoverArt({ src, title, className = "" }: { src: string | null; title: string; className?: string }) {
@@ -33,8 +33,12 @@ export function CoverArt({ src, title, className = "" }: { src: string | null; t
 export function Meta({ card }: { card: Pick<PageCard, "publishedAt" | "readingMinutes"> }) {
   return (
     <span className="text-xs text-fg-subtle">
-      {card.publishedAt && `${formatDate(card.publishedAt)} · `}
-      {card.readingMinutes} menit baca
+      {card.publishedAt && (
+        <>
+          <LocalDate value={card.publishedAt} /> ·{" "}
+        </>
+      )}
+      <T k="minRead" vars={{ n: card.readingMinutes }} />
     </span>
   );
 }
@@ -61,7 +65,7 @@ export function PageCardView({
         {showFeatured && card.featured && (
           <span className="inline-flex items-center gap-1 text-[11px] font-medium text-fg-muted">
             <Star className="size-3 fill-current text-accent" />
-            Unggulan
+            <T k="featured" />
           </span>
         )}
       </div>

@@ -606,3 +606,73 @@ body.block-dragging .editor-dropcursor {
   font-size: 1.0625rem;
   line-height: 1.8;
 }
+
+/* ---------- Docs layouts (components/publication/) ---------- */
+
+/* Buku: serif headings centred like a printed chapter, an ornament before each section. */
+.prose-docs.prose-book h2 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 1.75rem;
+  text-align: center;
+}
+.prose-docs.prose-book h2::before {
+  content: "§";
+  display: block;
+  margin-bottom: 0.35em;
+  font-size: 1rem;
+  color: var(--accent);
+}
+.prose-docs.prose-book h3 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 1.35rem;
+}
+
+/* Wiki: denser text, encyclopedia-style underlined section headings. */
+.prose-docs.prose-wiki {
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+.prose-docs.prose-wiki > * + * {
+  margin-top: 0.85em;
+}
+.prose-docs.prose-wiki h2 {
+  margin-top: 1.9em;
+  padding-bottom: 0.2em;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 1.45rem;
+}
+.prose-docs.prose-wiki h3 {
+  margin-top: 1.5em;
+  font-size: 1.05rem;
+}
+
+/* Majalah: a drop cap on the opening paragraph and serif section heads. */
+.prose-docs.prose-magazine > p:first-child::first-letter {
+  float: left;
+  margin: 0.08em 0.12em 0 0;
+  font-family: var(--font-serif);
+  font-size: 4.1em;
+  line-height: 0.8;
+  color: var(--accent);
+}
+.prose-docs.prose-magazine h2 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 1.85rem;
+}
+
+/* Pengembang: sections separated by a rule, monospace-flavoured small headings. */
+.prose-docs.prose-dev h2 {
+  margin-top: 2.75em;
+  padding-top: 1.25em;
+  border-top: 1px solid var(--line);
+}
+.prose-docs.prose-dev h3 {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  letter-spacing: 0;
+}

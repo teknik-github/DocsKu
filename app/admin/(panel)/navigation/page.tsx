@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { requireAdmin } from "@/lib/auth/dal";
 import { listPageOptions, readSettingForAdmin } from "@/lib/data/admin";
 import type { NavigationData } from "@/lib/site-types";
+import { getLanguageSettings } from "@/lib/data/site";
 import { NavigationEditor } from "@/components/admin/navigation-editor";
 import { PageHeader } from "@/components/admin/ui";
 
@@ -23,9 +24,10 @@ export default function NavigationPage() {
 
 async function Navigation() {
   await requireAdmin();
-  const [navigation, pages] = await Promise.all([
+  const [navigation, pages, languages] = await Promise.all([
     readSettingForAdmin<NavigationData>("navigation"),
     listPageOptions(),
+    getLanguageSettings(),
   ]);
-  return <NavigationEditor initial={navigation ?? { tabs: [] }} pages={pages} />;
+  return <NavigationEditor initial={navigation ?? { tabs: [] }} pages={pages} languages={languages.languages} />;
 }

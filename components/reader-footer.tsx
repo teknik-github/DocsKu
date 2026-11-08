@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSite } from "@/components/site-context";
+import { t } from "@/lib/i18n";
 import { Check, ThumbsDown, ThumbsUp } from "lucide-react";
 import { PageComments } from "@/components/page-comments";
 
@@ -47,6 +49,7 @@ export function ReaderFooter({ slug }: { slug: string }) {
 type Step = { name: "ask" } | { name: "message"; id: string; helpful: boolean } | { name: "done" };
 
 function PageFeedback({ slug }: { slug: string }) {
+  const { locale } = useSite();
   const key = `docsku:feedback:${slug}`;
   const answered = useSyncExternalStore(subscribe, () => Boolean(storage("local")?.getItem(key)), () => false);
   const [step, setStep] = useState<Step>({ name: "ask" });
@@ -65,7 +68,7 @@ function PageFeedback({ slug }: { slug: string }) {
     const response = await beacon("/api/feedback", { slug, helpful });
     setBusy(false);
     const data = response?.ok ? ((await response.json().catch(() => null)) as { id?: string } | null) : null;
-    if (!data?.id) return setError("Masukan belum terkirim. Coba lagi sebentar lagi.");
+    if (!data?.id) return setError(t(locale, "feedbackError"));
     storage("local")?.setItem(key, "1");
     setStep({ name: "message", id: data.id, helpful });
   }
@@ -76,25 +79,25 @@ function PageFeedback({ slug }: { slug: string }) {
     setError("");
     const response = await beacon("/api/feedback", { id, comment: message.trim() });
     setBusy(false);
-    if (!response?.ok) return setError("Pesan belum terkirim. Coba lagi sebentar lagi.");
+    if (!response?.ok) return setError(t(locale, "messageError"));
     finish();
   }
 
   const done = step.name === "done" || (answered && step.name === "ask");
   return (
-    <section aria-label="Masukan" data-testid="page-feedback" className="not-prose mt-16 rounded-xl border border-line bg-surface/60 px-5 py-4">
+    <section aria-label={t(locale, "feedbackLabel")} data-testid="page-feedback" className="not-prose mt-16 rounded-xl border border-line bg-surface/60 px-5 py-4">
       {done ? (
         <p className="flex items-center gap-2 text-sm text-fg-muted">
           <Check className="size-4 text-accent" />
-          Terima kasih atas masukan Anda.
+          {t(locale, "thanksDone")}
         </p>
       ) : step.name === "ask" ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm font-medium text-fg">Apakah halaman ini membantu?</p>
+          <p className="text-sm font-medium text-fg">{t(locale, "helpful")}</p>
           <div className="flex gap-2">
             {[
-              { helpful: true, label: "Ya", Icon: ThumbsUp },
-              { helpful: false, label: "Tidak", Icon: ThumbsDown },
+              { helpful: true, label: t(locale, "yes"), Icon: ThumbsUp },
+              { helpful: false, label: t(locale, "no"), Icon: ThumbsDown },
             ].map(({ helpful, label, Icon }) => (
               <button
                 key={label}
@@ -117,7 +120,7 @@ function PageFeedback({ slug }: { slug: string }) {
           }}
         >
           <label htmlFor={`feedback-${slug}`} className="block text-sm font-medium text-fg">
-            {step.helpful ? "Terima kasih! Bagian apa yang paling membantu?" : "Terima kasih! Apa yang kurang atau perlu diperbaiki?"}
+            {t(locale, step.helpful ? "thanksHelpful" : "thanksNotHelpful")}
           </label>
           <textarea
             id={`feedback-${slug}`}
@@ -125,17 +128,17 @@ function PageFeedback({ slug }: { slug: string }) {
             onChange={(event) => setMessage(event.target.value)}
             maxLength={1000}
             rows={3}
-            placeholder="Opsional"
+            placeholder={t(locale, "optional")}
             className="mt-2 w-full resize-y rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-line-strong"
           />
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-fg-subtle">Pesan hanya dibaca oleh tim dokumentasi, tidak ditampilkan di situs.</p>
+            <p className="text-xs text-fg-subtle">{t(locale, "feedbackPrivate")}</p>
             <div className="flex gap-2">
               <button type="button" onClick={finish} className="h-8 rounded-lg px-3 text-sm text-fg-muted hover:bg-fill hover:text-fg">
-                Lewati
+                {t(locale, "skip")}
               </button>
               <button type="submit" disabled={busy} className="h-8 rounded-lg bg-fg px-3 text-sm font-medium text-page hover:opacity-85 disabled:opacity-50">
-                Kirim
+                {t(locale, "send")}
               </button>
             </div>
           </div>

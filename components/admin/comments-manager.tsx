@@ -1,20 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Ban, Check, CheckCheck, ExternalLink, Inbox, Loader2, MessageSquarePlus, Send, Sparkles, Trash2 } from "lucide-react";
-import { approveComments, deleteComment, moderateComment, postStaffComment, replyToComment } from "@/app/admin/_actions/comments";
-import type { CommentThread, CommentView, ThreadMessage } from "@/lib/comments";
+import { CornerDownRight, Loader2, MessageSquare, MessageSquarePlus, Send, Sparkles, X } from "lucide-react";
+import { deleteComment, deleteComments, moderateComment, moderateComments, postStaffComment, replyToComment } from "@/app/admin/_actions/comments";
+import type { CommentRow, CommentView } from "@/lib/comments";
 import { formatDateTime } from "@/components/admin/format";
 import { readNdjson } from "@/components/admin/editor/ai-client";
 import { Alert, Button, Field, Panel, Select, Textarea, buttonClass } from "@/components/admin/ui";
 import { confirmDialog } from "@/components/admin/dialog";
 
 type Result = { ok: true } | { ok: false; error: string };
+type Run = (action: () => Promise<Result>, done?: string) => void;
 
 const EMPTY: Record<CommentView, string> = {
-  unanswered: "Semua komentar sudah dibalas. 🎉",
+  all: "Belum ada komentar.",
+  unanswered: "Semua komentar sudah dibalas.",
   pending: "Tidak ada komentar yang menunggu persetujuan.",
   approved: "Belum ada komentar yang disetujui.",
   spam: "Tidak ada spam.",
@@ -28,234 +30,266 @@ const TEMPLATES = [
   "Pertanyaan bagus. Kami akan menambahkan penjelasannya di dokumentasi.",
 ];
 
+const BULK = [
+  { value: "approved", label: "Setujui" },
+  { value: "pending", label: "Sembunyikan (kembali menunggu)" },
+  { value: "spam", label: "Tandai spam" },
+  { value: "delete", label: "Hapus permanen" },
+] as const;
+
+const COLS = "md:grid-cols-[2rem_13rem_minmax(0,1fr)_12rem_8.5rem] xl:grid-cols-[2rem_16rem_minmax(0,1fr)_16rem_10rem]";
+
 /**
- * Komentar as an inbox: one card per conversation (a comment and its replies),
- * a reply box always ready under it, quick answers and an AI draft.
+ * Komentar as a WordPress-style list: one compact row per comment, actions on
+ * hover, bulk actions, and a reply box that opens under the row.
  */
-export function CommentsInbox({ threads, view, aiEnabled, siteName }: { threads: CommentThread[]; view: CommentView; aiEnabled: boolean; siteName: string }) {
+export function CommentsTable({ rows, view, aiEnabled, siteName }: { rows: CommentRow[]; view: CommentView; aiEnabled: boolean; siteName: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [page, setPage] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState("");
+  const [replying, setReplying] = useState<string | null>(null);
 
-  function run(action: () => Promise<Result>, done?: string) {
+  const run: Run = (action, done) => {
     setError("");
     setNotice("");
     startTransition(async () => {
       const result = await action();
       if (!result.ok) return setError(result.error);
       if (done) setNotice(done);
+      setSelected(new Set());
       router.refresh();
     });
+  };
+
+  async function applyBulk() {
+    const ids = [...selected];
+    if (!bulk || ids.length === 0) return;
+    if (bulk === "delete") {
+      const ok = await confirmDialog({
+        title: `Hapus ${ids.length} komentar?`,
+        message: "Komentar dan balasan-balasannya dihapus permanen.",
+        confirmLabel: "Hapus",
+        tone: "danger",
+      });
+      if (ok) run(() => deleteComments(ids), `${ids.length} komentar dihapus.`);
+      return;
+    }
+    const label = BULK.find((b) => b.value === bulk)?.label.toLowerCase();
+    run(() => moderateComments(ids, bulk as "approved" | "pending" | "spam"), `${ids.length} komentar: ${label}.`);
   }
 
-  const pages = [...new Map(threads.map((t) => [t.pageId, t.pageTitle || "Tanpa judul"])).entries()];
-  const shown = page ? threads.filter((t) => t.pageId === page) : threads;
-  const waiting = shown.flatMap((t) => t.messages.filter((m) => m.status === "pending").map((m) => m.id));
+  const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
+  const toggle = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
-    <div className="space-y-4">
-      {(pages.length > 1 || (view === "pending" && waiting.length > 1)) && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {pages.length > 1 ? (
-            <Select value={page} onChange={(e) => setPage(e.target.value)} aria-label="Filter halaman" className="h-8 w-auto max-w-xs text-xs">
-              <option value="">Semua halaman ({threads.length} percakapan)</option>
-              {pages.map(([id, title]) => (
-                <option key={id} value={id}>
-                  {title}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <span />
-          )}
-          {view === "pending" && waiting.length > 1 && (
-            <Button size="sm" variant="secondary" disabled={pending} onClick={() => run(() => approveComments(waiting), `${waiting.length} komentar disetujui.`)}>
-              <CheckCheck className="size-3.5" />
-              Setujui semua ({waiting.length})
-            </Button>
-          )}
-        </div>
-      )}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={bulk} onChange={(e) => setBulk(e.target.value)} aria-label="Tindakan massal" className="h-8 w-56! text-xs">
+          <option value="">Tindakan massal</option>
+          {BULK.map((b) => (
+            <option key={b.value} value={b.value}>
+              {b.label}
+            </option>
+          ))}
+        </Select>
+        <Button size="sm" variant="secondary" onClick={applyBulk} disabled={!bulk || selected.size === 0 || pending}>
+          Terapkan{selected.size ? ` (${selected.size})` : ""}
+        </Button>
+      </div>
       {error && <Alert>{error}</Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
-      {shown.length === 0 ? (
-        <Panel className="px-5 py-14 text-center text-sm text-fg-subtle">{EMPTY[view]}</Panel>
-      ) : (
-        shown.map((thread) => <ThreadCard key={thread.id} thread={thread} view={view} busy={pending} run={run} aiEnabled={aiEnabled} siteName={siteName} />)
-      )}
+
+      <Panel className="overflow-hidden">
+        <div className={`hidden gap-3 border-b border-line bg-fill/40 px-4 py-2 text-xs font-medium text-fg-muted md:grid ${COLS}`}>
+          <input
+            type="checkbox"
+            aria-label="Pilih semua"
+            checked={allSelected}
+            onChange={() => setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.id)))}
+            className="size-4 self-center accent-accent"
+          />
+          <span>Penulis</span>
+          <span>Komentar</span>
+          <span>Untuk halaman</span>
+          <span>Dikirim</span>
+        </div>
+
+        {rows.length === 0 ? (
+          <p className="px-5 py-14 text-center text-sm text-fg-subtle">{EMPTY[view]}</p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {rows.map((row) => (
+              <Fragment key={row.id}>
+                <Row
+                  row={row}
+                  selected={selected.has(row.id)}
+                  onToggle={() => toggle(row.id)}
+                  replying={replying === row.id}
+                  onReply={() => setReplying(replying === row.id ? null : row.id)}
+                  busy={pending}
+                  run={run}
+                />
+                {replying === row.id && (
+                  <li className={`gap-x-3 bg-fill/30 px-4 py-3 md:grid ${COLS}`}>
+                    {/* Same columns as the rows, so the box lines up under the comment text. */}
+                    <div className="md:col-[3/6] xl:col-[3/5]">
+                      <Composer row={row} busy={pending} run={run} aiEnabled={aiEnabled} siteName={siteName} onClose={() => setReplying(null)} />
+                    </div>
+                  </li>
+                )}
+              </Fragment>
+            ))}
+          </ul>
+        )}
+      </Panel>
     </div>
   );
 }
 
-function ThreadCard({
-  thread,
-  view,
+function Row({
+  row,
+  selected,
+  onToggle,
+  replying,
+  onReply,
   busy,
   run,
-  aiEnabled,
-  siteName,
 }: {
-  thread: CommentThread;
-  view: CommentView;
+  row: CommentRow;
+  selected: boolean;
+  onToggle: () => void;
+  replying: boolean;
+  onReply: () => void;
   busy: boolean;
-  run: (action: () => Promise<Result>, done?: string) => void;
-  aiEnabled: boolean;
-  siteName: string;
+  run: Run;
 }) {
-  const [root, ...replies] = thread.messages;
-  const lastVisitor = [...thread.messages].reverse().find((m) => !m.staff && m.status !== "spam");
-  const canReply = thread.pagePublished && view !== "spam" && root.status !== "spam";
-  const hasPending = thread.messages.some((m) => m.status === "pending");
+  const waiting = row.status === "pending";
+  const actions: { label: string; onClick: () => void; danger?: boolean; href?: string }[] = [];
+  if (row.status !== "approved") actions.push({ label: row.status === "spam" ? "Bukan spam" : "Setujui", onClick: () => run(() => moderateComment(row.id, "approved"), "Komentar disetujui.") });
+  if (row.status === "approved") actions.push({ label: "Sembunyikan", onClick: () => run(() => moderateComment(row.id, "pending"), "Komentar disembunyikan.") });
+  if (row.status !== "spam" && row.pagePublished) actions.push({ label: replying ? "Tutup balasan" : "Balas", onClick: onReply });
+  if (row.status !== "spam" && !row.staff) actions.push({ label: "Spam", onClick: () => run(() => moderateComment(row.id, "spam"), "Ditandai spam.") });
+  actions.push({
+    label: "Hapus",
+    danger: true,
+    onClick: async () => {
+      const ok = await confirmDialog({
+        title: row.parentId ? "Hapus balasan ini?" : "Hapus komentar beserta balasannya?",
+        message: "Dihapus permanen. Untuk sekadar menyembunyikannya, pakai Sembunyikan.",
+        confirmLabel: "Hapus",
+        tone: "danger",
+      });
+      if (ok) run(() => deleteComment(row.id), "Komentar dihapus.");
+    },
+  });
 
   return (
-    <article className="overflow-hidden rounded-xl border border-line bg-surface" data-testid="comment-thread">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-fill/30 px-5 py-2.5 text-xs text-fg-subtle">
-        <span className="min-w-0 truncate">
-          di{" "}
-          <Link href={`/admin/pages/${thread.pageId}`} className="font-medium text-fg-muted hover:text-fg">
-            {thread.pageTitle || "Tanpa judul"}
-          </Link>
+    <li
+      data-testid="admin-comment"
+      className={`group relative grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 px-4 py-3 ${COLS} ${
+        waiting ? "bg-amber-50/70 dark:bg-amber-950/15" : selected ? "bg-accent-soft/30" : "hover:bg-fill/30"
+      }`}
+    >
+      {/* Pending comments get a coloured edge, like WordPress. */}
+      {waiting && <span className="absolute inset-y-0 left-0 w-1 bg-amber-400" aria-hidden />}
+      <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Pilih komentar ${row.name}`} className="mt-2 size-4 self-start justify-self-start accent-accent" />
+
+      <div className="flex min-w-0 items-start gap-2.5">
+        <span className={`inline-flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-medium ${row.staff ? "bg-accent text-white" : "bg-fill text-fg-muted"}`} aria-hidden>
+          {row.name.trim().charAt(0).toUpperCase()}
         </span>
-        {thread.pagePublished ? (
-          <a href={`/docs/${thread.pageSlug}#komentar`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-fg">
-            <ExternalLink className="size-3" />
-            Lihat di situs
-          </a>
-        ) : (
-          <span>· halaman tidak terbit</span>
-        )}
-        <span className="ml-auto">
-          {thread.messages.length} pesan · {formatDateTime(thread.lastAt)}
-        </span>
-        {hasPending && <span className="rounded-full bg-amber-100 px-2 py-px font-medium text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">Menunggu</span>}
-      </header>
-
-      <div className="px-5 py-4">
-        <Message message={root} busy={busy} run={run} />
-        {replies.length > 0 && (
-          <div className="mt-3 ml-4 space-y-3 border-l-2 border-line pl-5">
-            {replies.map((m) => (
-              <Message key={m.id} message={m} busy={busy} run={run} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {canReply && <Composer thread={thread} target={lastVisitor ?? root} busy={busy} run={run} aiEnabled={aiEnabled} siteName={siteName} />}
-    </article>
-  );
-}
-
-const STATUS_CHIP: Partial<Record<ThreadMessage["status"], { label: string; className: string }>> = {
-  pending: { label: "Menunggu", className: "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300" },
-  spam: { label: "Spam", className: "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300" },
-};
-
-function Message({ message: m, busy, run }: { message: ThreadMessage; busy: boolean; run: (action: () => Promise<Result>, done?: string) => void }) {
-  const chip = STATUS_CHIP[m.status];
-  return (
-    <div className="group flex gap-3" data-testid="admin-comment">
-      <span
-        aria-hidden
-        className={`inline-flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-medium ${m.staff ? "bg-accent text-white" : "bg-fill text-fg-muted"}`}
-      >
-        {m.name.trim().charAt(0).toUpperCase()}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
-          <span className="font-medium text-fg">{m.name}</span>
-          {m.staff && <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">Tim</span>}
-          {chip && <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${chip.className}`}>{chip.label}</span>}
-          {m.email && (
-            <a href={`mailto:${m.email}`} className="text-xs text-fg-subtle hover:text-fg">
-              {m.email}
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 text-sm font-medium text-fg">
+            <span className="truncate">{row.name}</span>
+            {row.staff && <span className="shrink-0 rounded bg-accent-soft px-1 py-px text-[10px] font-medium text-accent">Tim</span>}
+          </p>
+          {row.email && (
+            <a href={`mailto:${row.email}`} className="block truncate text-xs text-fg-subtle hover:text-fg">
+              {row.email}
             </a>
           )}
-          <span className="text-xs text-fg-subtle">{formatDateTime(m.createdAt)}</span>
-        </div>
-        <p className="mt-1 text-sm whitespace-pre-wrap break-words text-fg-muted">{m.body}</p>
-        {/* Moderation, one line under the message; fades in on hover, always reachable by keyboard. */}
-        <div className="mt-1.5 flex flex-wrap gap-1 opacity-70 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          {m.status !== "approved" && (
-            <ActionButton disabled={busy} onClick={() => run(() => moderateComment(m.id, "approved"), m.status === "spam" ? "Ditandai bukan spam." : "Komentar disetujui.")}>
-              <Check className="size-3" />
-              {m.status === "spam" ? "Bukan spam" : "Setujui"}
-            </ActionButton>
-          )}
-          {m.status === "approved" && (
-            <ActionButton disabled={busy} onClick={() => run(() => moderateComment(m.id, "pending"), "Komentar disembunyikan.")}>
-              <Inbox className="size-3" />
-              Sembunyikan
-            </ActionButton>
-          )}
-          {m.status !== "spam" && !m.staff && (
-            <ActionButton disabled={busy} onClick={() => run(() => moderateComment(m.id, "spam"), "Ditandai spam.")}>
-              <Ban className="size-3" />
-              Spam
-            </ActionButton>
-          )}
-          <ActionButton
-            disabled={busy}
-            danger
-            label={`Hapus komentar ${m.name}`}
-            onClick={async () => {
-              const ok = await confirmDialog({
-                title: m.parentId ? "Hapus balasan ini?" : "Hapus komentar beserta balasannya?",
-                message: "Dihapus permanen. Untuk sekadar menyembunyikannya, pakai Sembunyikan.",
-                confirmLabel: "Hapus",
-                tone: "danger",
-              });
-              if (ok) run(() => deleteComment(m.id), "Komentar dihapus.");
-            }}
-          >
-            <Trash2 className="size-3" />
-            Hapus
-          </ActionButton>
+          {/* Small screens: page and date under the author. */}
+          <p className="mt-0.5 truncate text-xs text-fg-subtle md:hidden">
+            {row.pageTitle || "Tanpa judul"} · {formatDateTime(row.createdAt)}
+          </p>
         </div>
       </div>
-    </div>
+
+      <div className="col-start-2 min-w-0 md:col-start-auto">
+        <div className="flex flex-wrap items-center gap-x-2 text-xs text-fg-subtle">
+          {waiting && <span className="font-medium text-amber-700 dark:text-amber-400">Menunggu persetujuan</span>}
+          {row.status === "spam" && <span className="font-medium text-red-600 dark:text-red-400">Spam</span>}
+          {row.parentName && (
+            <span className="inline-flex items-center gap-1" title={row.parentBody ?? undefined}>
+              <CornerDownRight className="size-3" />
+              Membalas <span className="text-fg-muted">{row.parentName}</span>
+            </span>
+          )}
+        </div>
+        <p className="mt-0.5 line-clamp-4 text-sm whitespace-pre-wrap break-words text-fg">{row.body}</p>
+        {/* Row actions: shown on hover or focus on wide screens, always on small ones. */}
+        <div className="mt-1 flex flex-wrap items-center text-xs md:opacity-0 md:transition-opacity md:group-hover:opacity-100 md:focus-within:opacity-100">
+          {actions.map((action, i) => (
+            <Fragment key={action.label}>
+              {i > 0 && <span className="px-1.5 text-line-strong">|</span>}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={action.onClick}
+                className={`font-medium disabled:opacity-50 ${action.danger ? "text-red-600 hover:underline dark:text-red-400" : "text-accent hover:underline"}`}
+              >
+                {action.label}
+              </button>
+            </Fragment>
+          ))}
+          {row.pagePublished && (
+            <>
+              <span className="px-1.5 text-line-strong">|</span>
+              <a href={`/docs/${row.pageSlug}#komentar`} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+                Lihat
+              </a>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="hidden min-w-0 text-sm md:block">
+        <Link href={`/admin/pages/${row.pageId}`} className="line-clamp-2 text-fg hover:text-accent">
+          {row.pageTitle || "Tanpa judul"}
+        </Link>
+        <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-fill px-1.5 py-px text-[11px] text-fg-muted" title={`${row.pageComments} komentar disetujui di halaman ini`}>
+          <MessageSquare className="size-3" />
+          {row.pageComments}
+        </span>
+        {!row.pagePublished && <span className="ml-1.5 text-[11px] text-fg-subtle">tidak terbit</span>}
+      </div>
+
+      <p className="hidden text-xs text-fg-muted md:block">{formatDateTime(row.createdAt)}</p>
+    </li>
   );
 }
 
-function ActionButton({ children, onClick, disabled, danger, label }: { children: React.ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; label?: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      className={`inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-fg-subtle hover:bg-fill disabled:opacity-50 ${danger ? "hover:text-red-600" : "hover:text-fg"}`}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** The reply box under a conversation: Ctrl+Enter sends, quick answers, and an AI draft to edit. */
-function Composer({
-  thread,
-  target,
-  busy,
-  run,
-  aiEnabled,
-  siteName,
-}: {
-  thread: CommentThread;
-  target: ThreadMessage;
-  busy: boolean;
-  run: (action: () => Promise<Result>, done?: string) => void;
-  aiEnabled: boolean;
-  siteName: string;
-}) {
+/** The reply box under a row: Ctrl+Enter sends, quick answers, and an AI draft to edit. */
+function Composer({ row, busy, run, aiEnabled, siteName, onClose }: { row: CommentRow; busy: boolean; run: Run; aiEnabled: boolean; siteName: string; onClose: () => void }) {
   const [text, setText] = useState("");
   const [drafting, setDrafting] = useState(false);
   const [aiError, setAiError] = useState("");
   const area = useRef<HTMLTextAreaElement>(null);
   const abort = useRef<AbortController | null>(null);
 
-  useEffect(() => () => abort.current?.abort(), []);
+  useEffect(() => {
+    area.current?.focus();
+    return () => abort.current?.abort();
+  }, []);
   useEffect(() => {
     const el = area.current;
     if (!el) return;
@@ -266,8 +300,8 @@ function Composer({
   function send() {
     const body = text.trim();
     if (!body) return;
-    run(() => replyToComment({ id: target.id, body }), `Balasan untuk ${target.name} terkirim dan langsung tampil.`);
-    setText("");
+    run(() => replyToComment({ id: row.id, body }), `Balasan untuk ${row.name} terkirim dan langsung tampil.`);
+    onClose();
   }
 
   async function suggest() {
@@ -276,9 +310,8 @@ function Composer({
     setText("");
     const controller = new AbortController();
     abort.current = controller;
-    const transcript = thread.messages
-      .filter((m) => m.status !== "spam")
-      .map((m) => `${m.staff ? `Tim (${m.name})` : `Pembaca (${m.name})`}: ${m.body}`)
+    const transcript = [row.parentName && row.parentBody ? `${row.parentName}: ${row.parentBody}` : "", `${row.staff ? "Tim" : "Pembaca"} (${row.name}): ${row.body}`]
+      .filter(Boolean)
       .join("\n\n");
     try {
       const res = await fetch("/admin/api/ai", {
@@ -289,7 +322,7 @@ function Composer({
           action: "custom",
           inline: true,
           fresh: true,
-          instruction: `Tulis balasan untuk komentar pembaca terakhir dalam percakapan di bawah, sebagai tim dokumentasi ${siteName}, di halaman "${thread.pageTitle}". Ramah, singkat (2–4 kalimat), dalam bahasa yang dipakai pembaca. Jawab pertanyaannya bila bisa; jangan mengarang fakta, perintah, atau tautan. Tanpa salam pembuka panjang dan tanpa tanda tangan.`,
+          instruction: `Tulis balasan untuk komentar pembaca terakhir di bawah, sebagai tim dokumentasi ${siteName}, di halaman "${row.pageTitle}". Ramah, singkat (2–4 kalimat), dalam bahasa yang dipakai pembaca. Jawab pertanyaannya bila bisa; jangan mengarang fakta, perintah, atau tautan. Tanpa salam pembuka panjang dan tanpa tanda tangan.`,
           selection: transcript,
         }),
       });
@@ -306,7 +339,15 @@ function Composer({
   }
 
   return (
-    <div className="border-t border-line bg-page/50 px-5 py-3">
+    <div>
+      <div className="mb-1.5 flex items-center justify-between text-xs text-fg-muted">
+        <span>
+          Membalas <span className="font-medium text-fg">{row.name}</span> sebagai Tim
+        </span>
+        <button type="button" onClick={onClose} aria-label="Tutup balasan" className="text-fg-subtle hover:text-fg">
+          <X className="size-4" />
+        </button>
+      </div>
       <div className="rounded-lg border border-line bg-surface focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
         <textarea
           ref={area}
@@ -317,12 +358,13 @@ function Composer({
               e.preventDefault();
               send();
             }
+            if (e.key === "Escape") onClose();
           }}
           rows={2}
           maxLength={2000}
           disabled={drafting}
-          aria-label={`Balasan untuk ${target.name}`}
-          placeholder={drafting ? "AI sedang menyusun draf…" : `Balas ${target.name} sebagai Tim…`}
+          aria-label={`Balasan untuk ${row.name}`}
+          placeholder={drafting ? "AI sedang menyusun draf…" : "Tulis balasan…"}
           className="block w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm text-fg outline-none placeholder:text-fg-subtle"
         />
         <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
@@ -335,7 +377,7 @@ function Composer({
                 setText((current) => (current.trim() ? `${current.trimEnd()} ${template}` : template));
                 area.current?.focus();
               }}
-              className="max-w-[16rem] truncate rounded-full border border-line px-2 py-0.5 text-[11px] text-fg-muted hover:border-accent hover:text-fg disabled:opacity-50"
+              className="max-w-[15rem] truncate rounded-full border border-line px-2 py-0.5 text-[11px] text-fg-muted hover:border-accent hover:text-fg disabled:opacity-50"
               title={template}
             >
               {template}
@@ -351,7 +393,7 @@ function Composer({
               {drafting ? "Berhenti" : "Saran AI"}
             </button>
           )}
-          <span className="ml-auto hidden text-[11px] text-fg-subtle sm:inline">Ctrl+Enter untuk kirim</span>
+          <span className="ml-auto hidden text-[11px] text-fg-subtle sm:inline">Ctrl+Enter kirim · Esc tutup</span>
           <button type="button" onClick={send} disabled={busy || drafting || !text.trim()} className={buttonClass("accent", "sm")}>
             <Send className="size-3.5" />
             Kirim
@@ -359,9 +401,7 @@ function Composer({
         </div>
       </div>
       {aiError && <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{aiError}</p>}
-      <p className="mt-1.5 text-[11px] text-fg-subtle">
-        Balasan langsung tampil{target.status === "pending" ? `, dan komentar ${target.name} ikut disetujui` : ""}.
-      </p>
+      {row.status === "pending" && <p className="mt-1.5 text-[11px] text-fg-subtle">Membalas juga menyetujui komentar ini.</p>}
     </div>
   );
 }
@@ -376,14 +416,14 @@ export function StaffCommentForm({ pages }: { pages: { id: string; title: string
 
   if (pages.length === 0) return null;
   return (
-    <Panel className="p-5">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-fg">
+    <details className="group rounded-xl border border-line bg-surface">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3 text-sm font-medium text-fg [&::-webkit-details-marker]:hidden">
         <MessageSquarePlus className="size-4 text-accent" />
-        Berkomentar sebagai tim
-      </h2>
-      <p className="mt-1 text-xs text-fg-subtle">Komentar baru (bukan balasan) langsung tampil di halaman dengan nama akun Anda dan label Tim.</p>
+        Komentar baru sebagai tim
+        <span className="ml-auto text-xs font-normal text-fg-subtle group-open:hidden">Buka</span>
+      </summary>
       <form
-        className="mt-4 space-y-3"
+        className="space-y-3 border-t border-line px-5 py-4"
         data-testid="staff-comment-form"
         onSubmit={(event) => {
           event.preventDefault();
@@ -397,6 +437,7 @@ export function StaffCommentForm({ pages }: { pages: { id: string; title: string
           });
         }}
       >
+        <p className="text-xs text-fg-subtle">Komentar baru (bukan balasan) langsung tampil di halaman dengan nama akun Anda dan label Tim.</p>
         <Field label="Halaman">
           <Select value={pageId} onChange={(e) => setPageId(e.target.value)} required>
             <option value="" disabled>
@@ -417,6 +458,6 @@ export function StaffCommentForm({ pages }: { pages: { id: string; title: string
           Kirim komentar
         </Button>
       </form>
-    </Panel>
+    </details>
   );
 }

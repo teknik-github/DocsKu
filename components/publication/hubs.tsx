@@ -4,18 +4,27 @@ import type { NavTab, PageCard, SiteSettings } from "@/lib/site-types";
 import { SearchField } from "@/components/search";
 import { PageCardView } from "@/components/publication/cards";
 import { GhostGrid, type GhostItem } from "@/components/publication/ghost-grid";
+import { T } from "@/components/locale-text";
 
 /** Hybrid layout: the docs hub as card grids, one per section. */
 export function HybridHub({ tabs, cards }: { tabs: NavTab[]; cards: Map<string, PageCard> }) {
   return (
     <main className="mx-auto max-w-6xl px-5 pt-14 pb-24 sm:px-8">
       <header className="max-w-2xl">
-        <h1 className="font-serif text-4xl font-light tracking-tight text-fg sm:text-5xl">Dokumentasi</h1>
-        <p className="mt-4 text-lg text-fg-muted">Semua panduan dan referensi, dikelompokkan per bagian.</p>
+        <h1 className="font-serif text-4xl font-light tracking-tight text-fg sm:text-5xl">
+          <T k="docs" />
+        </h1>
+        <p className="mt-4 text-lg text-fg-muted">
+          <T k="hubIntro" />
+        </p>
         <SearchField className="mt-8 h-11 max-w-md" />
       </header>
 
-      {tabs.length === 0 && <p className="mt-12 text-sm text-fg-muted">Belum ada halaman yang diterbitkan.</p>}
+      {tabs.length === 0 && (
+        <p className="mt-12 text-sm text-fg-muted">
+          <T k="noPages" />
+        </p>
+      )}
 
       {tabs.map((tab) => (
         <section key={tab.title} className="mt-20">

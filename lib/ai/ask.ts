@@ -58,18 +58,18 @@ function chunkPage(doc: JSONContent, href: string, page: string, section: string
   return chunks;
 }
 
-/** Passages of every page that is published and listed in the navigation. */
-export async function getAskCorpus(): Promise<AskChunk[]> {
+/** Passages of every page that is published and listed in the navigation, in one language (the default without `locale`). */
+export async function getAskCorpus(locale?: string): Promise<AskChunk[]> {
   "use cache";
-  cacheTag("pages", "navigation");
+  cacheTag("pages", "navigation", "settings");
   cacheLife("max");
   if (buildingWithoutDatabase) return [];
   const [tabs, rows] = await Promise.all([
-    getNavigation(),
+    getNavigation(locale),
     db
       .select({ slug: schema.pages.slug, content: schema.pages.content })
       .from(schema.pages)
-      .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"))),
+      .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"), eq(schema.pages.visibility, "public"))),
   ]);
   const content = new Map(rows.map((row) => [slugToHref(row.slug), row.content]));
   return allPages(tabs).flatMap((page) => {
@@ -159,7 +159,7 @@ export function sourcesOf(chunks: AskChunk[]): AskSource[] {
   return [...seen.values()];
 }
 
-export function askMessages(siteName: string, question: string, chunks: AskChunk[]): ChatMessage[] {
+export function askMessages(siteName: string, question: string, chunks: AskChunk[], language?: string): ChatMessage[] {
   const context = chunks
     .map((chunk, i) =>
       [`[Dokumen ${i + 1}] ${chunk.page}${chunk.heading ? ` › ${chunk.heading}` : ""}`, `URL: ${chunk.href}`, chunk.text].join("\n"),
@@ -171,7 +171,9 @@ export function askMessages(siteName: string, question: string, chunks: AskChunk
       content: [
         `Anda asisten pusat bantuan ${siteName}. Jawab pertanyaan pembaca HANYA berdasarkan potongan dokumentasi yang diberikan.`,
         "Aturan:",
-        "- Jawab dalam bahasa yang dipakai penanya (bawaan: Bahasa Indonesia), ringkas dan langsung ke inti: paling banyak sekitar 250 kata.",
+        language
+          ? `- Jawab dalam bahasa ${language} (pembaca membuka dokumentasi berbahasa ${language}), ringkas dan langsung ke inti: paling banyak sekitar 250 kata.`
+          : "- Jawab dalam bahasa yang dipakai penanya (bawaan: Bahasa Indonesia), ringkas dan langsung ke inti: paling banyak sekitar 250 kata.",
         "- Gunakan Markdown: langkah bernomor untuk prosedur, blok kode dengan bahasa untuk perintah atau kode. Salin perintah dan kode persis dari dokumentasi.",
         "- Rujuk sumber dengan tautan Markdown ke URL dokumen yang dipakai, misalnya [Mulai cepat](/docs/mulai-cepat). Jangan membuat URL lain.",
         "- Jangan mengarang fakta, perintah, harga, atau fitur yang tidak ada di dokumentasi. Boleh menyimpulkan langsung dari isinya.",

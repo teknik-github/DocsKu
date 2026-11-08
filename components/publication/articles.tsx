@@ -6,11 +6,14 @@ import { toMarkdown } from "@/lib/content/markdown";
 import { RenderDoc } from "@/lib/content/render";
 import { allPages, getPager, locate, topicSlug } from "@/lib/navigation";
 import type { NavTab, PageCard } from "@/lib/site-types";
+import type { PublicAuthor } from "@/lib/authors";
 import { CopyPageButton } from "@/components/copy-page-button";
 import { SiteFooter } from "@/components/site-footer";
 import { CoverArt, Meta, PageCardView } from "@/components/publication/cards";
 import { SectionMenu } from "@/components/publication/section-menu";
 import { TableOfContents } from "@/components/toc";
+import { HubLink, T } from "@/components/locale-text";
+import { AuthorByline } from "@/components/author";
 
 export type ArticleData = {
   href: string;
@@ -22,20 +25,24 @@ export type ArticleData = {
   autoCover?: string | null;
   publishedAt: string | null;
   readingMinutes: number;
+  /** Shown as the byline (and, by the route, the author box); null when unknown or turned off. */
+  author?: PublicAuthor | null;
 };
 
-const markdownOf = (a: ArticleData) => `# ${a.title}\n\n${a.description ? `${a.description}\n\n` : ""}${toMarkdown(a.doc)}`;
+export const markdownOf = (a: ArticleData) => `# ${a.title}\n\n${a.description ? `${a.description}\n\n` : ""}${toMarkdown(a.doc)}`;
 
 /** Collapsible table of contents above the article, for screens too narrow for the side column. */
-function InlineToc({ doc, className = "" }: { doc: JSONContent; className?: string }) {
+export function InlineToc({ doc, className = "" }: { doc: JSONContent; className?: string }) {
   const headings = tocHeadings(doc);
   if (headings.length < 3) return null;
   return (
     <details className={`group mb-10 rounded-xl border border-line bg-surface px-4 py-3 text-sm ${className}`}>
       <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-fg [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-4 text-fg-subtle transition-transform group-open:rotate-90" />
-        Isi halaman
-        <span className="font-normal text-fg-subtle">· {headings.length} bagian</span>
+        <T k="contentsOfPage" />
+        <span className="font-normal text-fg-subtle">
+          · <T k="nSections" vars={{ n: headings.length }} />
+        </span>
       </summary>
       <ul className="mt-3 space-y-1.5 border-l border-line">
         {headings.map((h) => (
@@ -54,7 +61,7 @@ function InlineToc({ doc, className = "" }: { doc: JSONContent; className?: stri
  * "Di halaman ini" in the right margin on wide screens (xl), sticky and following the
  * scroll. Sits in column 3 of a `[1fr article 1fr]` grid so the article stays centred.
  */
-function SideToc({ doc }: { doc: JSONContent }) {
+export function SideToc({ doc }: { doc: JSONContent }) {
   return (
     <aside className="hidden xl:col-start-3 xl:row-start-1 xl:block">
       <div className="sticky top-[calc(var(--header-h)+3rem)] max-h-[calc(100vh-var(--header-h)-4rem)] overflow-y-auto pb-4">
@@ -64,7 +71,7 @@ function SideToc({ doc }: { doc: JSONContent }) {
   );
 }
 
-function cardsFor(hrefs: string[], cards: Map<string, PageCard>) {
+export function cardsFor(hrefs: string[], cards: Map<string, PageCard>) {
   return hrefs.flatMap((href) => {
     const card = cards.get(href);
     return card ? [card] : [];
@@ -95,9 +102,9 @@ export function HybridArticle({
       <div className="mx-auto max-w-6xl px-5 pt-8 pb-20 sm:px-8">
         <div className="mb-12 flex flex-wrap items-center justify-between gap-3">
           <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm text-fg-subtle">
-            <Link href="/docs" className="hover:text-fg">
-              Dokumentasi
-            </Link>
+            <HubLink className="hover:text-fg">
+              <T k="docs" />
+            </HubLink>
             {place && (
               <>
                 <ChevronRight className="size-3.5" />
@@ -118,6 +125,7 @@ export function HybridArticle({
             <header className="mb-10">
               <h1 className="font-serif text-4xl leading-tight font-light tracking-tight text-fg sm:text-5xl">{article.title}</h1>
               {article.description && <p className="mt-4 text-xl leading-relaxed text-fg-muted">{article.description}</p>}
+              <AuthorByline author={article.author} className="mt-6" />
               <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-y border-line py-3">
                 <Meta card={article} />
                 <CopyPageButton markdown={markdownOf(article)} />
@@ -140,7 +148,7 @@ export function HybridArticle({
                   <Link href={prev.href} className="group rounded-xl border border-line p-4 transition-colors hover:border-line-strong hover:bg-fill/40">
                     <span className="flex items-center gap-1 text-xs text-fg-subtle">
                       <ArrowLeft className="size-3 transition-transform group-hover:-translate-x-0.5" />
-                      Sebelumnya
+                      <T k="prev" />
                     </span>
                     <span className="mt-1 block text-sm font-medium text-fg">{prev.title}</span>
                   </Link>
@@ -150,7 +158,7 @@ export function HybridArticle({
                 {next && (
                   <Link href={next.href} className="group rounded-xl border border-line p-4 text-right transition-colors hover:border-line-strong hover:bg-fill/40">
                     <span className="flex items-center justify-end gap-1 text-xs text-fg-subtle">
-                      Berikutnya
+                      <T k="next" />
                       <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
                     </span>
                     <span className="mt-1 block text-sm font-medium text-fg">{next.title}</span>
@@ -164,7 +172,9 @@ export function HybridArticle({
 
         {related.length > 0 && place && (
           <section className="mt-20 border-t border-line pt-12">
-            <h2 className="mb-8 font-serif text-2xl font-light text-fg">Halaman lain di {place.section.title}</h2>
+            <h2 className="mb-8 font-serif text-2xl font-light text-fg">
+              <T k="otherPagesIn" vars={{ section: place.section.title }} />
+            </h2>
             <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
               {related.map((card) => (
                 <PageCardView key={card.href} card={card} tag={place.section.title} />
@@ -209,12 +219,13 @@ export function GhostArticle({
         <header className="mx-auto max-w-3xl px-5 pt-14 text-center sm:px-8 lg:pt-20">
           {banner}
           {place && (
-            <Link href={`/docs?topik=${topicSlug(place.tab.title)}`} className="text-xs font-semibold tracking-wide text-accent uppercase hover:underline">
+            <HubLink suffix={`?topik=${topicSlug(place.tab.title)}`} className="text-xs font-semibold tracking-wide text-accent uppercase hover:underline">
               {place.section.title}
-            </Link>
+            </HubLink>
           )}
           <h1 className="mt-3 font-serif text-4xl leading-tight font-light tracking-tight text-fg sm:text-6xl">{article.title}</h1>
           {article.description && <p className="mx-auto mt-5 max-w-2xl text-xl leading-relaxed text-fg-muted">{article.description}</p>}
+          <AuthorByline author={article.author} align="center" className="mt-6" />
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <Meta card={article} />
             <CopyPageButton markdown={markdownOf(article)} />
@@ -240,7 +251,9 @@ export function GhostArticle({
       {more.length > 0 && (
         <section className="border-t border-line bg-surface/50">
           <div className="mx-auto max-w-6xl px-5 py-16 sm:px-8">
-            <h2 className="mb-10 text-center font-serif text-3xl font-light text-fg">Tulisan lain</h2>
+            <h2 className="mb-10 text-center font-serif text-3xl font-light text-fg">
+              <T k="otherPosts" />
+            </h2>
             <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
               {more.map(({ page, card }) => (
                 <PageCardView key={card.href} card={card} tag={page.section} showFeatured />

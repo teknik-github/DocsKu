@@ -4,6 +4,7 @@ import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import { and, asc, desc, eq, ilike, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
+import { logActivity } from "@/lib/activity";
 import { COMPONENTS } from "@/lib/ai/agent";
 import { placementOf } from "@/lib/automation";
 import { mdxToDoc } from "@/lib/content/mdx-to-doc";
@@ -56,6 +57,9 @@ async function readNavigation(): Promise<NavigationData> {
 
 export function createDocskuServer({ principal, baseUrl, invalidate }: { principal: TokenPrincipal; baseUrl: string; invalidate: Invalidate }) {
   const can = (scope: McpScope) => principal.scopes.includes(scope);
+  /** Activity log entry for a write through this token. */
+  const log = (action: string, page: { id: string; label: string | null }, meta?: Record<string, unknown>) =>
+    logActivity({ user: { id: principal.userId, name: principal.name }, action, target: { type: "page", id: page.id, label: page.label }, meta: { via: "mcp", ...meta } });
   const urls = (page: { id: string; slug: string }) => ({
     url: `${baseUrl}/docs/${page.slug}`,
     editor: `${baseUrl}/admin/pages/${page.id}`,
@@ -83,7 +87,7 @@ ${COMPONENTS}`,
       async ({ query, limit }) => {
         const term = `%${query.replace(/[%_\\]/g, "\\$&")}%`;
         const rows = await db
-          .select({ id: schema.pages.id, slug: schema.pages.slug, title: schema.pages.draftTitle, description: schema.pages.draftDescription, status: schema.pages.status })
+          .select({ id: schema.pages.id, slug: schema.pages.slug, title: schema.pages.draftTitle, description: schema.pages.draftDescription, status: schema.pages.status, visibility: schema.pages.visibility, locale: schema.pages.locale, translationOf: schema.pages.translationOf })
           .from(schema.pages)
           .where(
             and(
@@ -104,20 +108,25 @@ ${COMPONENTS}`,
         description: "Daftar halaman dokumentasi, yang terakhir diubah lebih dulu. Bisa difilter per status.",
         inputSchema: z.object({
           status: z.enum(["draft", "scheduled", "published"]).optional(),
+          visibility: z.enum(["public", "internal"]).optional().describe("internal = hanya untuk tim yang masuk, tidak tampil di situs publik."),
           limit: z.number().int().min(1).max(100).default(50),
           offset: z.number().int().min(0).default(0),
         }),
         annotations: { readOnlyHint: true },
       },
-      async ({ status, limit, offset }) => {
+      async ({ status, visibility, limit, offset }) => {
         const filters: SQL[] = [eq(schema.pages.kind, "doc")];
         if (status) filters.push(eq(schema.pages.status, status));
+        if (visibility) filters.push(eq(schema.pages.visibility, visibility));
         const rows = await db
           .select({
             id: schema.pages.id,
             slug: schema.pages.slug,
             title: schema.pages.draftTitle,
             status: schema.pages.status,
+            visibility: schema.pages.visibility,
+            locale: schema.pages.locale,
+            translationOf: schema.pages.translationOf,
             hasUnpublishedChanges: schema.pages.hasChanges,
             publishedAt: schema.pages.publishedAt,
             updatedAt: schema.pages.updatedAt,
@@ -151,6 +160,10 @@ ${COMPONENTS}`,
           id: page.id,
           slug: page.slug,
           status: page.status,
+          visibility: page.visibility,
+          // Language; a translation also names the page it translates (its own place in navigation is the original's).
+          locale: page.locale,
+          translationOf: page.translationOf,
           hasUnpublishedChanges: page.hasChanges,
           publishedAt: page.publishedAt,
           navigation: placementOf(await readNavigation(), page.id),
@@ -214,6 +227,7 @@ ${COMPONENTS}`,
       },
       async (input) => {
         const page = await createPageFromMarkdown(input, principal.userId, "mcp");
+        await log("page.create", { id: page.id, label: input.title });
         return json({ id: page.id, slug: page.slug, status: "draft", ...urls(page) });
       },
     );
@@ -252,6 +266,7 @@ ${COMPONENTS}`,
         if (!parsed.success) return fail(parsed.error.issues[0].message);
         const saved = await saveWorkingCopy(page.id, parsed.data, principal.userId, "mcp");
         if (!saved.ok) return fail(saved.error);
+        await log("page.edit", { id: page.id, label: parsed.data.title || page.slug });
         return json({ id: page.id, slug: page.slug, status: page.status, hasUnpublishedChanges: saved.hasChanges, ...urls(page) });
       },
     );
@@ -283,6 +298,7 @@ ${COMPONENTS}`,
         if (!draft.success) return fail(draft.error.issues[0].message);
         const result = await publishWorkingCopy(page.id, draft.data, publish_at ?? null, principal.userId, invalidate);
         if (!result.ok) return fail(result.error);
+        await log(result.status === "scheduled" ? "page.schedule" : "page.publish", { id: page.id, label: draft.data.title || page.slug }, result.status === "scheduled" ? { publishAt: result.publishedAt } : undefined);
         return json({ id: page.id, status: result.status, publishedAt: result.publishedAt, automation: result.filled, ...urls({ id: page.id, slug: result.slug }) });
       },
     );
@@ -300,6 +316,7 @@ ${COMPONENTS}`,
         if (!page) return fail(`Halaman "${ref}" tidak ditemukan.`);
         const result = await unpublish(page.id, principal.userId, invalidate);
         if (!result.ok) return fail(result.error);
+        if (page.status !== "draft") await log(page.status === "scheduled" ? "page.unschedule" : "page.unpublish", { id: page.id, label: page.draftTitle || page.title || page.slug });
         return json({ id: page.id, slug: page.slug, status: "draft" });
       },
     );

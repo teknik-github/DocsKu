@@ -5,6 +5,7 @@ import { db, schema } from "@/db";
 import { isSameOrigin } from "@/lib/auth/request";
 import { readSessionUser } from "@/lib/auth/session";
 import { detectImage, IMAGE_TYPES, MAX_UPLOAD_BYTES, mediaUrl, uploadDir, uploadPath } from "@/lib/media";
+import { logActivity } from "@/lib/activity";
 
 /** Lists uploaded images for the editor's media picker. */
 const crossOrigin = () => Response.json({ error: "Permintaan dari situs lain ditolak." }, { status: 403 });
@@ -62,5 +63,6 @@ export async function POST(request: Request) {
     .values({ filename, originalName, mimeType: IMAGE_TYPES[ext], size: bytes.length, uploadedById: user.id })
     .returning({ id: schema.media.id });
 
+  await logActivity({ user, action: "media.upload", target: { type: "media", id: row.id, label: originalName }, meta: { file: filename, size: bytes.length } });
   return Response.json({ id: row.id, url: mediaUrl(filename), originalName }, { status: 201 });
 }

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Globe, MessageCircleQuestion, MessageSquare, Plug, Sparkles, Workflow, type LucideIcon } from "lucide-react";
+import { CalendarClock, Globe, Languages, LifeBuoy, ShieldCheck, MessageCircleQuestion, MessageSquare, Plug, Sparkles, Workflow, type LucideIcon } from "lucide-react";
 
 export type SettingsSection = {
-  id: "umum" | "ai" | "tanya-ai" | "otomatisasi" | "komentar" | "integrasi";
+  id: "umum" | "ai" | "tanya-ai" | "otomatisasi" | "komentar" | "tinjauan" | "bahasa" | "keamanan" | "widget" | "integrasi";
   label: string;
   /** Short state shown under the label, e.g. "Aktif" or "Mati". */
   status?: { text: string; tone: "on" | "off" | "warn" | "plain" };
@@ -16,6 +16,10 @@ const ICONS: Record<SettingsSection["id"], LucideIcon> = {
   "tanya-ai": MessageCircleQuestion,
   otomatisasi: Workflow,
   komentar: MessageSquare,
+  tinjauan: CalendarClock,
+  bahasa: Languages,
+  keamanan: ShieldCheck,
+  widget: LifeBuoy,
   integrasi: Plug,
 };
 

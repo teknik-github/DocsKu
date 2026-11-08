@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, ChevronDown, List } from "lucide-react";
 import type { NavLink } from "@/lib/site-types";
+import { T } from "@/components/locale-text";
 
 /** "Di bagian ini": the pages of the current section, for layouts without a sidebar. */
 export function SectionMenu({ section, pages, current }: { section: string; pages: NavLink[]; current: string }) {
@@ -32,7 +33,7 @@ export function SectionMenu({ section, pages, current }: { section: string; page
         className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-xs text-fg-muted hover:text-fg"
       >
         <List className="size-3.5" />
-        Di bagian ini
+        <T k="inThisSection" />
         {index >= 0 && <span className="text-fg-subtle">· {index + 1}/{pages.length}</span>}
         <ChevronDown className={`size-3 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>

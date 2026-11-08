@@ -22,8 +22,12 @@ export function slugify(text: string) {
  * as redirects (old addresses of other pages) count as taken, so they keep working.
  */
 export async function uniqueSlug(base: string, exceptId?: string) {
+  // An enabled language code ("en") is the hub of that language, and "en/…" its pages.
+  const [languages] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, "languages"));
+  const reserved = new Set(((languages?.value as { languages?: { code: string }[] } | undefined)?.languages ?? []).map((l) => l.code));
   for (let i = 0; i < 100; i++) {
     const candidate = i === 0 ? base : `${base}-${i + 1}`;
+    if (reserved.has(candidate.split("/")[0])) continue;
     const [taken] = await db
       .select({ id: schema.pages.id })
       .from(schema.pages)

@@ -1,10 +1,12 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { updateTag } from "next/cache";
 import { and, count, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { logActivity } from "@/lib/activity";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { createSession, destroyUserSessions } from "@/lib/auth/session";
 import { emailSchema, fieldErrors, keepValues, passwordSchema, type FormState } from "@/lib/validation";
@@ -34,12 +36,16 @@ export async function createUser(_: FormState, formData: FormData): Promise<Form
   const parsed = newUserSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error), values };
   if (await emailTaken(parsed.data.email)) return { fieldErrors: { email: "Email sudah terdaftar." }, values };
-  await db.insert(schema.users).values({
-    name: parsed.data.name,
-    email: parsed.data.email,
-    role: parsed.data.role,
-    passwordHash: await hashPassword(parsed.data.password),
-  });
+  const [created] = await db
+    .insert(schema.users)
+    .values({
+      name: parsed.data.name,
+      email: parsed.data.email,
+      role: parsed.data.role,
+      passwordHash: await hashPassword(parsed.data.password),
+    })
+    .returning({ id: schema.users.id });
+  await logActivity({ user, action: "user.create", target: { type: "user", id: created.id, label: parsed.data.name }, meta: { email: parsed.data.email, role: parsed.data.role } });
   return { success: `Akun ${parsed.data.email} dibuat. Berikan password awalnya kepada pengguna tersebut.` };
 }
 
@@ -55,7 +61,10 @@ export async function changeRole(userId: string, newRole: "admin" | "editor") {
   if (userId === user.id && newRole !== "admin") {
     return { ok: false as const, error: "Anda tidak bisa menurunkan peran akun sendiri." };
   }
+  const [before] = await db.select({ role: schema.users.role, name: schema.users.name }).from(schema.users).where(eq(schema.users.id, userId));
+  if (!before) return { ok: false as const, error: "Pengguna tidak ditemukan." };
   await db.update(schema.users).set({ role: newRole }).where(eq(schema.users.id, userId));
+  if (before.role !== newRole) await logActivity({ user, action: "user.role", target: { type: "user", id: userId, label: before.name }, meta: { from: before.role, to: newRole } });
   return { ok: true as const };
 }
 
@@ -65,7 +74,13 @@ export async function resetPassword(userId: string, password: string) {
   if (!isId(userId)) return { ok: false as const, error: "Pengguna tidak ditemukan." };
   const parsed = passwordSchema.safeParse(password);
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0].message };
-  await db.update(schema.users).set({ passwordHash: await hashPassword(parsed.data) }).where(eq(schema.users.id, userId));
+  const [target] = await db
+    .update(schema.users)
+    .set({ passwordHash: await hashPassword(parsed.data) })
+    .where(eq(schema.users.id, userId))
+    .returning({ name: schema.users.name });
+  if (!target) return { ok: false as const, error: "Pengguna tidak ditemukan." };
+  await logActivity({ user, action: "user.password_reset", target: { type: "user", id: userId, label: target.name } });
   // Sign the user out everywhere with the old password.
   await destroyUserSessions(userId);
   if (userId === user.id) await createSession(user.id);
@@ -77,32 +92,20 @@ export async function deleteUser(userId: string) {
   if ("error" in user) return { ok: false as const, error: user.error };
   if (!isId(userId)) return { ok: false as const, error: "Pengguna tidak ditemukan." };
   if (userId === user.id) return { ok: false as const, error: "Anda tidak bisa menghapus akun sendiri." };
-  const [target] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, userId));
+  const [target] = await db.select({ role: schema.users.role, name: schema.users.name, email: schema.users.email }).from(schema.users).where(eq(schema.users.id, userId));
   if (!target) return { ok: false as const, error: "Pengguna tidak ditemukan." };
   if (target.role === "admin" && (await adminCount()) <= 1) {
     return { ok: false as const, error: "Harus ada minimal satu admin." };
   }
   await db.delete(schema.users).where(eq(schema.users.id, userId));
+  // Their articles fall back to the last editor as author; their /penulis page goes away.
+  updateTag("pages");
+  updateTag("authors");
+  await logActivity({ user, action: "user.delete", target: { type: "user", id: userId, label: target.name }, meta: { email: target.email, role: target.role } });
   return { ok: true as const };
 }
 
 // ---- Own profile ----
-
-const profileSchema = z.object({
-  name: z.string().trim().min(1, "Nama wajib diisi.").max(100),
-  email: emailSchema,
-});
-
-export async function updateProfile(_: FormState, formData: FormData): Promise<FormState> {
-  const user = await authorize();
-  if ("error" in user) redirect("/admin/login");
-  const values = keepValues(formData, ["name", "email"]);
-  const parsed = profileSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error), values };
-  if (await emailTaken(parsed.data.email, user.id)) return { fieldErrors: { email: "Email sudah dipakai akun lain." }, values };
-  await db.update(schema.users).set(parsed.data).where(eq(schema.users.id, user.id));
-  return { success: "Profil disimpan.", values: parsed.data };
-}
 
 const passwordChangeSchema = z
   .object({ current: z.string().min(1, "Masukkan password saat ini."), password: passwordSchema, confirm: z.string() })
@@ -118,6 +121,7 @@ export async function changeOwnPassword(_: FormState, formData: FormData): Promi
     return { fieldErrors: { current: "Password saat ini salah." } };
   }
   await db.update(schema.users).set({ passwordHash: await hashPassword(parsed.data.password) }).where(eq(schema.users.id, user.id));
+  await logActivity({ user, action: "user.password", target: { type: "user", id: user.id, label: user.name } });
   // Other devices are signed out; this one gets a fresh session.
   await destroyUserSessions(user.id);
   await createSession(user.id);

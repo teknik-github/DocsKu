@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ChevronRight, KeyRound, Server } from "lucide-react";
 import { requireAdmin } from "@/lib/auth/dal";
 import { readSettingForAdmin } from "@/lib/data/admin";
-import { DEFAULT_SITE, getAskAiSettings, getCommentSettings } from "@/lib/data/site";
+import { DEFAULT_SITE, getAskAiAvailable, getAskAiSettings, getCommentSettings, getWidgetSettings } from "@/lib/data/site";
 import type { SiteSettings } from "@/lib/site-types";
 import { SiteSettingsForm } from "@/components/admin/site-settings-form";
 import { AiSettingsForm } from "@/components/admin/ai-settings-form";
@@ -14,7 +14,17 @@ import { CommentSettingsForm } from "@/components/admin/comment-settings-form";
 import { AskAiSettingsForm } from "@/components/admin/ask-ai-settings-form";
 import { SettingsNav, type SettingsSection } from "@/components/admin/settings-nav";
 import { askedToday } from "@/lib/ai/ask";
+import { countOverdueReviews, getReviewSettings } from "@/lib/review";
+import { ReviewSettingsForm } from "@/components/admin/review-settings-form";
 import { PageHeader, Panel } from "@/components/admin/ui";
+import { WidgetSettingsForm } from "@/components/admin/widget-settings-form";
+import { LanguageSettingsForm } from "@/components/admin/language-settings-form";
+import { readLanguages } from "@/lib/translations";
+import { COLOR_THEMES, colorThemeOf } from "@/lib/color-themes";
+import { SecuritySettingsForm } from "@/components/admin/security-settings-form";
+import { getSecuritySettings } from "@/lib/data/security";
+import { db } from "@/db";
+import { sql } from "drizzle-orm";
 
 export const metadata = { title: "Pengaturan" };
 
@@ -44,8 +54,18 @@ function Section({ id, title, description, children }: { id: SettingsSection["id
   );
 }
 
+/** Admins, and how many of them use 2FA (Keamanan). */
+async function adminTwoFactor(userId: string) {
+  const [row] = await db.execute<{ total: number; with2fa: number; own: boolean }>(sql`
+    select count(*)::int as total, count(totp_enabled_at)::int as with2fa,
+      bool_or(id = ${userId} and totp_enabled_at is not null) as own
+    from users where role = 'admin'`);
+  return { total: row?.total ?? 0, withTwoFactor: row?.with2fa ?? 0, ownEnabled: Boolean(row?.own) };
+}
+
 async function Settings() {
-  await requireAdmin();
+  const me = await requireAdmin();
+  const [security, adminsTwoFactor] = await Promise.all([getSecuritySettings(), adminTwoFactor(me.id)]);
   const [stored, ai, aiReady, automation, askAi, asked, comments] = await Promise.all([
     readSettingForAdmin<Partial<SiteSettings>>("site"),
     readStoredAi(),
@@ -56,6 +76,13 @@ async function Settings() {
     getCommentSettings(),
   ]);
   const site = { ...DEFAULT_SITE, ...stored };
+  const [widget, askAiAvailable] = await Promise.all([getWidgetSettings(), getAskAiAvailable()]);
+  const themeAccent = (COLOR_THEMES.find((t) => t.id === colorThemeOf(site.colorTheme)) ?? COLOR_THEMES[0]).light.accent;
+  const [review, overdue] = await Promise.all([getReviewSettings(), countOverdueReviews()]);
+  const [languages, translationCounts] = await Promise.all([
+    readLanguages(),
+    db.execute<{ locale: string; n: number }>(sql`select locale, count(*)::int as n from pages where translation_of is not null group by locale`),
+  ]);
   const automationOn = (["navigation", "slug", "description", "seo", "cover"] as const).filter((key) => automation[key]).length;
 
   const sections: SettingsSection[] = [
@@ -75,6 +102,34 @@ async function Settings() {
       id: "komentar",
       label: "Komentar",
       status: comments.enabled ? { text: comments.moderation ? "Aktif · dimoderasi" : "Aktif", tone: "on" } : { text: "Mati", tone: "off" },
+    },
+    {
+      id: "tinjauan",
+      label: "Tinjauan konten",
+      status: review.enabled && review.defaultIntervalDays ? { text: `Tiap ${review.defaultIntervalDays} hari`, tone: overdue ? "warn" : "on" } : { text: review.enabled ? "Per halaman" : "Mati", tone: review.enabled ? "on" : "off" },
+    },
+    {
+      id: "bahasa",
+      label: "Bahasa",
+      status: languages.languages.length
+        ? { text: `${languages.defaultLocale.toUpperCase()} + ${languages.languages.map((l) => l.code.toUpperCase()).join(", ")}`, tone: "on" }
+        : { text: languages.defaultLabel, tone: "plain" },
+    },
+    {
+      id: "keamanan",
+      label: "Keamanan",
+      status: security.requireAdmin2fa
+        ? { text: "2FA wajib untuk admin", tone: "on" }
+        : { text: `${adminsTwoFactor.withTwoFactor}/${adminsTwoFactor.total} admin 2FA`, tone: adminsTwoFactor.withTwoFactor < adminsTwoFactor.total ? "warn" : "on" },
+    },
+    {
+      id: "widget",
+      label: "Widget bantuan",
+      status: widget.enabled
+        ? widget.allowedOrigins.length
+          ? { text: `Aktif · ${widget.allowedOrigins.length} situs`, tone: "on" }
+          : { text: "Belum ada situs", tone: "warn" }
+        : { text: "Mati", tone: "off" },
     },
     { id: "integrasi", label: "Integrasi", status: { text: "MCP", tone: "plain" } },
   ];
@@ -97,6 +152,18 @@ async function Settings() {
         </Section>
         <Section id="komentar">
           <CommentSettingsForm initial={comments} />
+        </Section>
+        <Section id="tinjauan">
+          <ReviewSettingsForm initial={review} overdue={overdue} />
+        </Section>
+        <Section id="bahasa">
+          <LanguageSettingsForm initial={languages} translations={Object.fromEntries([...translationCounts].map((row) => [row.locale, row.n]))} />
+        </Section>
+        <Section id="keamanan">
+          <SecuritySettingsForm initial={security} admins={{ total: adminsTwoFactor.total, withTwoFactor: adminsTwoFactor.withTwoFactor }} ownEnabled={adminsTwoFactor.ownEnabled} />
+        </Section>
+        <Section id="widget">
+          <WidgetSettingsForm initial={widget} siteUrl={process.env.SITE_URL?.replace(/\/+$/, "") || null} themeAccent={themeAccent} askAiAvailable={askAiAvailable} />
         </Section>
         <Section id="integrasi" title="Integrasi" description="Hubungkan aplikasi AI lain ke dokumentasi ini, atau beri AI Chat alat dari server luar.">
           <Panel className="max-w-3xl divide-y divide-line">

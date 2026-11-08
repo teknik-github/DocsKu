@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { FileQuestion, Files, ListTree, Plus, Search } from "lucide-react";
+import { FileQuestion, Files, ListTree, Lock, Plus, Search } from "lucide-react";
 import { createPage } from "@/app/admin/_actions/pages";
 import { requireUser } from "@/lib/auth/dal";
 import { listPages } from "@/lib/data/admin";
@@ -13,6 +13,7 @@ import { PagesTable } from "@/components/admin/pages-table";
 import { CategoryActions, CategoryImage, NewCategoryButton } from "@/components/admin/category-tools";
 import { Icon } from "@/components/icon";
 import { PageHeader, buttonClass, inputClass } from "@/components/admin/ui";
+import { readLanguages } from "@/lib/translations";
 
 export const metadata = { title: "Halaman" };
 
@@ -48,7 +49,17 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
   const params = await searchParams;
   const status = FILTERS.find((f) => f.status === params.status)?.status;
   const q = typeof params.q === "string" ? params.q.trim() : "";
-  const [navigation, allPages] = await Promise.all([readNavigation(), listPages()]);
+  const [navigation, everyPage, languages] = await Promise.all([readNavigation(), listPages(), readLanguages()]);
+  // Translations are listed under their original (badges), or on their own with ?bahasa=<code>.
+  const language = languages.languages.find((l) => l.code === params.bahasa)?.code ?? null;
+  const translationsOf = new Map<string, typeof everyPage>();
+  for (const page of everyPage) {
+    if (page.translationOf) translationsOf.set(page.translationOf, [...(translationsOf.get(page.translationOf) ?? []), page]);
+  }
+  const originals = everyPage.filter((page) => !page.translationOf);
+  const allPages = language
+    ? everyPage.filter((page) => page.translationOf && page.locale === language)
+    : originals;
 
   const groups = categoryGroups(navigation);
   const categories = new Map<string, Category & { group: string; icon: string }>();
@@ -59,8 +70,14 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
   }
   const listed = listedIn(navigation);
   /** A page's category: where it is listed, or where it goes on publish. */
-  const categoryOf = (page: { id: string; navSection: string | null }) =>
-    listed.get(page.id) ?? (page.navSection && categories.has(page.navSection) ? page.navSection : null);
+  const categoryOf = (page: { id: string; navSection: string | null; translationOf?: string | null }): string | null => {
+    // A translation sits in its original's category.
+    if (page.translationOf) {
+      const original = originals.find((o) => o.id === page.translationOf);
+      return original ? categoryOf(original) : null;
+    }
+    return listed.get(page.id) ?? (page.navSection && categories.has(page.navSection) ? page.navSection : null);
+  };
 
   const counts = new Map<string, number>();
   let uncategorised = 0;
@@ -88,13 +105,15 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
     pages = [...pages].sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
   }
 
-  const href = (next: { kategori?: string; status?: PageStatus | null }) => {
+  const href = (next: { kategori?: string; status?: PageStatus | null; bahasa?: string | null }) => {
     const query = new URLSearchParams();
     const kategori = next.kategori ?? selected;
     if (kategori !== ALL) query.set("kategori", kategori);
     const s = next.status === undefined ? status : next.status;
     if (s) query.set("status", s);
     if (q) query.set("q", q);
+    const b = next.bahasa === undefined ? language : next.bahasa;
+    if (b) query.set("bahasa", b);
     const text = query.toString();
     return `/admin/pages${text ? `?${text}` : ""}`;
   };
@@ -142,6 +161,18 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
               </div>
             </div>
           ))}
+          {allPages.some((page) => page.visibility === "internal") && (
+            <a
+              href="/internal"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-fg-muted transition-colors hover:bg-fill hover:text-fg"
+            >
+              <Lock className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span className="min-w-0 flex-1 truncate">Artikel internal</span>
+              <span className="text-xs text-fg-subtle tabular-nums">{allPages.filter((page) => page.visibility === "internal").length}</span>
+            </a>
+          )}
           {(uncategorised > 0 || groups.length === 0) && (
             <div className="space-y-0.5 border-t border-line pt-3">
               {sideLink(NONE, "Tanpa kategori", uncategorised, <FileQuestion className="size-4 shrink-0 text-fg-subtle" />)}
@@ -204,9 +235,26 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
               </Link>
             ))}
           </div>
+          {languages.languages.length > 0 && (
+            <div className="flex gap-1 rounded-lg bg-fill p-1" aria-label="Bahasa" data-testid="language-filter">
+              {[{ code: null, label: languages.defaultLocale }, ...languages.languages.map((l) => ({ code: l.code, label: l.code }))].map((option) => (
+                <Link
+                  key={option.label}
+                  href={href({ bahasa: option.code })}
+                  title={option.code ? `Terjemahan ${languages.languages.find((l) => l.code === option.code)?.label}` : `Halaman asli (${languages.defaultLabel})`}
+                  className={`rounded-md px-2.5 py-1 font-mono text-xs uppercase transition-colors ${
+                    option.code === language ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
+                  }`}
+                >
+                  {option.label}
+                </Link>
+              ))}
+            </div>
+          )}
           <form className="relative w-full sm:w-64">
             {selected !== ALL && <input type="hidden" name="kategori" value={selected} />}
             {status && <input type="hidden" name="status" value={status} />}
+            {language && <input type="hidden" name="bahasa" value={language} />}
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-fg-subtle" />
             <input name="q" defaultValue={q} placeholder="Cari judul atau slug…" className={`${inputClass} pl-9`} />
           </form>
@@ -224,7 +272,11 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
               updatedAt: page.updatedAt.toISOString(),
               publishedAt: page.publishedAt?.toISOString() ?? null,
               category: info ? `${info.group} › ${info.title}` : null,
-              pendingCategory: Boolean(category) && !listed.has(page.id),
+              pendingCategory: !page.translationOf && Boolean(category) && !listed.has(page.id),
+              locale: page.translationOf ? page.locale : null,
+              translations: page.translationOf
+                ? undefined
+                : (translationsOf.get(page.id) ?? []).map((t) => ({ id: t.id, locale: t.locale, status: t.status })),
             };
           })}
         />

@@ -1,9 +1,10 @@
 import "server-only";
-import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import type { PageStatus } from "@/db/schema";
 import { homeTemplate } from "@/lib/content/home-template";
+import { dueAtSql } from "@/lib/review";
 
 /**
  * Uncached reads for the dashboard. Callers must check auth first
@@ -33,6 +34,9 @@ const pageListColumns = {
   status: schema.pages.status,
   hasChanges: schema.pages.hasChanges,
   navSection: schema.pages.navSection,
+  visibility: schema.pages.visibility,
+  locale: schema.pages.locale,
+  translationOf: schema.pages.translationOf,
   publishedAt: schema.pages.publishedAt,
   updatedAt: schema.pages.updatedAt,
   updatedBy: schema.users.name,
@@ -95,7 +99,8 @@ export async function listPageOptions() {
       status: schema.pages.status,
     })
     .from(schema.pages)
-    .where(eq(schema.pages.kind, "doc"))
+    // Translations take their original's place in navigation; they are never listed themselves.
+    .where(and(eq(schema.pages.kind, "doc"), isNull(schema.pages.translationOf)))
     .orderBy(asc(schema.pages.slug));
 }
 
@@ -125,8 +130,11 @@ export async function listUsers() {
     pages: number;
     last_login: Date | string | null;
     active: boolean;
+    two_factor: boolean;
+    avatar: string | null;
+    job_title: string | null;
   }>(sql`
-    select u.id, u.name, u.email, u.role, u.created_at,
+    select u.id, u.name, u.email, u.role, u.created_at, (u.totp_enabled_at is not null) as two_factor, u.avatar, u.job_title,
       (select count(*) from pages p where p.author_id = u.id and p.kind = 'doc')::int as pages,
       (select max(s.created_at) from sessions s where s.user_id = u.id) as last_login,
       exists (select 1 from sessions s where s.user_id = u.id and s.expires_at > now()) as active
@@ -142,6 +150,9 @@ export async function listUsers() {
     pages: row.pages,
     lastLogin: row.last_login ? iso(row.last_login) : null,
     active: row.active,
+    twoFactor: row.two_factor,
+    avatar: row.avatar,
+    jobTitle: row.job_title,
   }));
 }
 
@@ -178,10 +189,11 @@ export async function ensureHomePage(userId: string, siteName: string) {
 
 /** Badges in the dashboard sidebar: things waiting for someone. One small query per page load. */
 export async function getNavCounts() {
-  const [row] = await db.execute<{ comments: number; feedback: number; drafts: number }>(sql`
+  const [row] = await db.execute<{ comments: number; feedback: number; drafts: number; review: number }>(sql`
     select
+      (select count(*) from pages p where p.kind = 'doc' and p.status = 'published' and ${dueAtSql} < now())::int as review,
       (select count(*) from page_comments where status = 'pending')::int as comments,
       (select count(*) from page_feedback where not resolved and comment is not null)::int as feedback,
       (select count(*) from pages where kind = 'doc' and (status = 'draft' or has_changes))::int as drafts`);
-  return row ?? { comments: 0, feedback: 0, drafts: 0 };
+  return row ?? { comments: 0, feedback: 0, drafts: 0, review: 0 };
 }

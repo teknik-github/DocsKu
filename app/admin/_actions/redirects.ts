@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { logActivity } from "@/lib/activity";
 import { slugSchema } from "@/lib/pages/service";
 import { forgetRedirects, normalisePath } from "@/lib/redirects";
 
@@ -48,6 +49,7 @@ export async function createRedirect(input: z.input<typeof redirectSchema>): Pro
     .returning({ id: schema.redirects.id });
   if (!created) return { ok: false, error: "Sudah ada redirect dari alamat ini." };
   forgetRedirects();
+  await logActivity({ user, action: "redirect.create", target: { type: "redirect", id: created.id, label: `/docs/${from.data}` }, meta: { to } });
   return { ok: true };
 }
 
@@ -55,7 +57,8 @@ export async function deleteRedirect(id: string): Promise<Result> {
   const user = await authorize("admin");
   if ("error" in user) return { ok: false, error: user.error };
   if (!z.uuid().safeParse(id).success) return { ok: false, error: "Redirect tidak ditemukan." };
-  await db.delete(schema.redirects).where(eq(schema.redirects.id, id));
+  const [deleted] = await db.delete(schema.redirects).where(eq(schema.redirects.id, id)).returning({ fromPath: schema.redirects.fromPath, toUrl: schema.redirects.toUrl });
   forgetRedirects();
+  if (deleted) await logActivity({ user, action: "redirect.delete", target: { type: "redirect", id, label: `/docs/${deleted.fromPath}` }, meta: deleted.toUrl ? { to: deleted.toUrl } : undefined });
   return { ok: true };
 }

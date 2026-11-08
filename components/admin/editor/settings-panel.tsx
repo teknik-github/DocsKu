@@ -5,9 +5,13 @@ import { ExternalLink, History, RotateCcw, Trash2, X } from "lucide-react";
 import { deletePage, setFeatured, setNavSection, updateSlug } from "@/app/admin/_actions/pages";
 import { formatDateTime } from "@/components/admin/format";
 import { ImageDialog } from "@/components/admin/editor/image-dialog";
+import { ReviewSection } from "@/components/admin/editor/review-section";
 import type { PageSeo } from "@/lib/site-types";
 import { Button, Select, StatusBadge, inputClass } from "@/components/admin/ui";
 import { confirmDialog } from "@/components/admin/dialog";
+import { VisibilityToggle } from "@/components/admin/editor/visibility-toggle";
+import { TranslationSection } from "@/components/admin/editor/translation-section";
+import { AuthorSection } from "@/components/admin/editor/author-section";
 
 export type RevisionItem = {
   id: string;
@@ -48,6 +52,7 @@ export function SettingsPanel({
   revisions,
   onSlugChange,
   featured: initialFeatured,
+  visibility,
   navigation,
   aiEnabled,
   seo,
@@ -66,6 +71,7 @@ export function SettingsPanel({
   revisions: RevisionItem[];
   onSlugChange: (slug: string) => void;
   featured: boolean;
+  visibility: "public" | "internal";
   navigation: EditorNavigation;
   aiEnabled: boolean;
   seo: PageSeo;
@@ -81,6 +87,8 @@ export function SettingsPanel({
   const [saved, setSaved] = useState(false);
   const [featured, setFeaturedState] = useState(initialFeatured);
   const [pending, startTransition] = useTransition();
+  // A translation inherits visibility and its place in navigation from the original.
+  const [isTranslation, setIsTranslation] = useState(false);
   if (slug !== lastSlug) {
     // Keep the field in sync when the slug is set from elsewhere (e.g. from the title).
     setLastSlug(slug);
@@ -193,7 +201,15 @@ export function SettingsPanel({
           </label>
         )}
 
-        {!isHome && <NavigationSection pageId={pageId} navigation={navigation} aiEnabled={aiEnabled} />}
+        {!isHome && <AuthorSection pageId={pageId} />}
+
+        {!isHome && <TranslationSection pageId={pageId} status={status} onKind={setIsTranslation} />}
+
+        {!isHome && !isTranslation && <VisibilityToggle pageId={pageId} initial={visibility} />}
+
+        {!isHome && !isTranslation && <NavigationSection pageId={pageId} navigation={navigation} aiEnabled={aiEnabled} />}
+
+        {!isHome && <ReviewSection pageId={pageId} status={status} />}
 
         <SeoSection
           seo={seo}

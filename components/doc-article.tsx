@@ -5,9 +5,12 @@ import { tocHeadings } from "@/lib/content/doc";
 import { toMarkdown } from "@/lib/content/markdown";
 import { RenderDoc } from "@/lib/content/render";
 import type { NavLink } from "@/lib/site-types";
+import type { PublicAuthor } from "@/lib/authors";
 import { CopyPageButton } from "@/components/copy-page-button";
 import { SiteFooter } from "@/components/site-footer";
 import { TableOfContents } from "@/components/toc";
+import { T } from "@/components/locale-text";
+import { AuthorByline } from "@/components/author";
 
 /** A docs page body: title, content, prev/next links, and the table of contents. */
 export function DocArticle({
@@ -19,6 +22,7 @@ export function DocArticle({
   next,
   banner,
   footer,
+  author,
 }: {
   title: string;
   description: string;
@@ -29,6 +33,7 @@ export function DocArticle({
   banner?: React.ReactNode;
   /** Shown after the content on the public site (reader feedback); left out in previews. */
   footer?: React.ReactNode;
+  author?: PublicAuthor | null;
 }) {
   const markdown = `# ${title}\n\n${description ? `${description}\n\n` : ""}${toMarkdown(doc)}`;
 
@@ -44,6 +49,7 @@ export function DocArticle({
               <CopyPageButton markdown={markdown} />
             </div>
             {description && <p className="mt-3 text-lg text-fg-muted">{description}</p>}
+            <AuthorByline author={author} className="mt-5" />
           </header>
 
           <div className="prose-docs">
@@ -60,7 +66,7 @@ export function DocArticle({
                 >
                   <span className="flex items-center gap-1 text-xs text-fg-subtle">
                     <ArrowLeft className="size-3 transition-transform group-hover:-translate-x-0.5" />
-                    Sebelumnya
+                    <T k="prev" />
                   </span>
                   <span className="mt-1 block text-sm font-medium text-fg">{prev.title}</span>
                 </Link>
@@ -73,7 +79,7 @@ export function DocArticle({
                   className="group rounded-xl border border-line p-4 text-right transition-colors hover:border-line-strong hover:bg-fill/40"
                 >
                   <span className="flex items-center justify-end gap-1 text-xs text-fg-subtle">
-                    Berikutnya
+                    <T k="next" />
                     <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
                   </span>
                   <span className="mt-1 block text-sm font-medium text-fg">{next.title}</span>

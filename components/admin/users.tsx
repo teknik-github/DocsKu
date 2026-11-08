@@ -2,12 +2,14 @@
 
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, KeyRound, PenLine, Search, ShieldCheck, Shuffle, Trash2, UserPlus, X } from "lucide-react";
+import { Check, Copy, KeyRound, PenLine, Search, ShieldCheck, ShieldOff, Shuffle, Trash2, UserPlus, X } from "lucide-react";
 import { changeRole, createUser, deleteUser, resetPassword } from "@/app/admin/_actions/users";
+import { resetUserTwoFactor } from "@/app/admin/_actions/two-factor";
 import { formatDateTime } from "@/components/admin/format";
 import { Alert, Button, Field, Input, Panel, Select, inputClass } from "@/components/admin/ui";
 import { confirmDialog, promptDialog } from "@/components/admin/dialog";
 import { copyText } from "@/lib/copy-text";
+import { Avatar } from "@/components/avatar";
 
 export type UserRow = {
   id: string;
@@ -20,6 +22,10 @@ export type UserRow = {
   lastLogin: string | null;
   /** Has a session that hasn't expired (signed in somewhere). */
   active: boolean;
+  /** Two-step login (TOTP) is on. */
+  twoFactor: boolean;
+  avatar: string | null;
+  jobTitle: string | null;
 };
 
 const ROLES = {
@@ -34,32 +40,6 @@ const ROLES = {
     text: "Menulis, menyunting, menerbitkan, dan menjadwalkan halaman; mengunggah media; memakai AI; mengelola komentar.",
   },
 } as const;
-
-const AVATAR_TONES = [
-  "bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
-  "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
-  "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
-  "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
-  "bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300",
-];
-
-function Avatar({ name, email }: { name: string; email: string }) {
-  const initials =
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join("") || email[0]?.toUpperCase();
-  let hash = 0;
-  for (const char of email) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return (
-    <span className={`flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${AVATAR_TONES[hash % AVATAR_TONES.length]}`} aria-hidden>
-      {initials}
-    </span>
-  );
-}
 
 /** /admin/users: summary, what each role may do, and the list with inline actions. */
 export function UsersView({ users, currentUserId }: { users: UserRow[]; currentUserId: string }) {
@@ -84,6 +64,7 @@ export function UsersView({ users, currentUserId }: { users: UserRow[]; currentU
     { label: "Admin", value: admins },
     { label: "Editor", value: users.length - admins },
     { label: "Sedang masuk", value: users.filter((u) => u.active).length },
+    { label: "Pakai 2FA", value: users.filter((u) => u.twoFactor).length },
   ];
 
   return (
@@ -134,7 +115,7 @@ export function UsersView({ users, currentUserId }: { users: UserRow[]; currentU
         </div>
 
         {/* Column headings on wide screens; each row becomes a card on small ones. */}
-        <div className="hidden grid-cols-[minmax(0,1fr)_8rem_5rem_12rem_5rem] gap-4 border-b border-line px-5 py-2 text-xs text-fg-subtle md:grid">
+        <div className="hidden grid-cols-[minmax(0,1fr)_8rem_5rem_12rem_6.5rem] gap-4 border-b border-line px-5 py-2 text-xs text-fg-subtle md:grid">
           <span>Pengguna</span>
           <span>Peran</span>
           <span className="text-right">Halaman</span>
@@ -148,20 +129,52 @@ export function UsersView({ users, currentUserId }: { users: UserRow[]; currentU
             const self = user.id === currentUserId;
             const lastAdmin = user.role === "admin" && admins <= 1;
             return (
-              <li key={user.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 px-5 py-4 md:grid-cols-[minmax(0,1fr)_8rem_5rem_12rem_5rem]">
+              <li key={user.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 px-5 py-4 md:grid-cols-[minmax(0,1fr)_8rem_5rem_12rem_6.5rem]">
                 <div className="flex min-w-0 items-center gap-3">
-                  <Avatar name={user.name} email={user.email} />
+                  <Avatar name={user.name} src={user.avatar} size={36} />
                   <div className="min-w-0">
                     <p className="flex items-center gap-1.5 text-sm font-medium text-fg">
                       <span className="truncate">{user.name}</span>
                       {self && <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-px text-[10px] font-medium text-accent">Anda</span>}
+                      {user.twoFactor && (
+                        <span
+                          className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-px text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                          title="Verifikasi dua langkah aktif"
+                        >
+                          <ShieldCheck className="size-2.5" />
+                          2FA
+                        </span>
+                      )}
                     </p>
-                    <p className="truncate text-xs text-fg-subtle">{user.email}</p>
+                    <p className="truncate text-xs text-fg-subtle">
+                      {user.jobTitle && <span className="text-fg-muted">{user.jobTitle} · </span>}
+                      {user.email}
+                    </p>
                   </div>
                 </div>
 
                 {/* Actions: right of the name on small screens, last column on wide ones. */}
                 <div className="flex justify-end gap-0.5 md:order-last">
+                  {user.twoFactor && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={pending}
+                      title="Atur ulang verifikasi dua langkah"
+                      aria-label={`Atur ulang 2FA ${user.name}`}
+                      onClick={async () => {
+                        const ok = await confirmDialog({
+                          title: `Atur ulang 2FA ${user.name}?`,
+                          message: `${user.email} bisa masuk hanya dengan password sampai mengaktifkan verifikasi dua langkah lagi. Lakukan ini hanya jika ponsel dan kode pemulihannya hilang, dan pastikan permintaan ini benar-benar dari orangnya.`,
+                          confirmLabel: "Atur ulang 2FA",
+                          tone: "danger",
+                        });
+                        if (ok) act(() => resetUserTwoFactor(user.id), `Verifikasi dua langkah ${user.name} dinonaktifkan.`);
+                      }}
+                    >
+                      <ShieldOff className="size-3.5" />
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"

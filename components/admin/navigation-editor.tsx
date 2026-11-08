@@ -7,6 +7,7 @@ import { RowControls, move, removeAt, replaceAt } from "@/components/admin/list-
 import { Alert, Button, Panel, inputClass } from "@/components/admin/ui";
 import type { NavigationData, NavItemData, NavSectionData, NavTabData } from "@/lib/site-types";
 import { confirmDialog } from "@/components/admin/dialog";
+import type { Language } from "@/lib/i18n";
 
 type PageOption = { id: string; slug: string; title: string; status: "draft" | "scheduled" | "published" };
 
@@ -143,7 +144,40 @@ function ItemList({
   );
 }
 
-export function NavigationEditor({ initial, pages }: { initial: NavigationData; pages: PageOption[] }) {
+/** A tab or section title in the extra languages (Pengaturan → Bahasa); empty uses the default title. */
+function TitleTranslations({
+  languages,
+  titles,
+  placeholder,
+  onChange,
+}: {
+  languages: Language[];
+  titles: Record<string, string> | undefined;
+  placeholder: string;
+  onChange: (titles: Record<string, string>) => void;
+}) {
+  if (!languages.length) return null;
+  return (
+    <div className="mb-3 flex flex-wrap gap-2">
+      {languages.map((language) => (
+        <label key={language.code} className="flex min-w-48 flex-1 items-center gap-1.5">
+          <span className="w-8 shrink-0 text-[11px] font-semibold text-fg-subtle uppercase" title={language.label}>
+            {language.code}
+          </span>
+          <input
+            value={titles?.[language.code] ?? ""}
+            onChange={(e) => onChange({ ...titles, [language.code]: e.target.value })}
+            placeholder={placeholder}
+            aria-label={`${placeholder} (${language.label})`}
+            className={`${small} flex-1`}
+          />
+        </label>
+      ))}
+    </div>
+  );
+}
+
+export function NavigationEditor({ initial, pages, languages = [] }: { initial: NavigationData; pages: PageOption[]; languages?: Language[] }) {
   const [tabs, setTabs] = useState<NavTabData[]>(initial.tabs);
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
@@ -200,6 +234,7 @@ export function NavigationEditor({ initial, pages }: { initial: NavigationData; 
               }}
             />
           </div>
+          <TitleTranslations languages={languages} titles={tab.titles} placeholder={tab.title || "Nama tab"} onChange={(titles) => updateTab(i, { ...tab, titles })} />
 
           <div className="space-y-4">
             {tab.sections.map((section, s) => (
@@ -220,6 +255,12 @@ export function NavigationEditor({ initial, pages }: { initial: NavigationData; 
                     onRemove={() => updateTab(i, { ...tab, sections: removeAt(tab.sections, s) })}
                   />
                 </div>
+                <TitleTranslations
+                  languages={languages}
+                  titles={section.titles}
+                  placeholder={section.title || "Judul section"}
+                  onChange={(titles) => updateSection(tab, i, s, { ...section, titles })}
+                />
                 <ItemList
                   items={section.items}
                   pages={pages}

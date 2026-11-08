@@ -4,7 +4,7 @@ import { getAiConfig } from "@/lib/ai/config";
 import { streamChat } from "@/lib/ai/client";
 import { askedToday, askMessages, getAskCorpus, NO_ANSWER, recordAsk, retrieve, sourcesOf } from "@/lib/ai/ask";
 import { cacheKey, getCached, setCached } from "@/lib/ai/response-cache";
-import { getAskAiAvailable, getAskAiSettings, getSiteSettings } from "@/lib/data/site";
+import { getAskAiAvailable, getAskAiSettings, getLanguageSettings, getSiteSettings } from "@/lib/data/site";
 import { readPublicJson } from "@/lib/reader";
 
 /**
@@ -20,7 +20,7 @@ const MAX_TOKENS = 1000;
 const GLOBAL_PER_MINUTE = 40;
 const BOT = /bot|crawl|spider|slurp|preview|headless|lighthouse|python|curl|wget|httpclient|axios|node-fetch/i;
 
-const bodySchema = z.object({ question: z.string().trim().min(3).max(300) });
+const bodySchema = z.object({ question: z.string().trim().min(3).max(300), locale: z.string().max(20).optional() });
 const fail = (error: string, status: number) => Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
 
 export async function POST(request: Request) {
@@ -38,12 +38,15 @@ export async function POST(request: Request) {
 
   const question = input.data.question.replace(/\s+/g, " ");
   const query = question.toLowerCase();
-  const [corpus, site, aiConfig] = await Promise.all([getAskCorpus(), getSiteSettings(), getAiConfig()]);
+  // The reader's language (an enabled extra one), else the default: its pages answer, in its language.
+  const languages = await getLanguageSettings();
+  const language = languages.languages.find((l) => l.code === input.data.locale);
+  const [corpus, site, aiConfig] = await Promise.all([getAskCorpus(language?.code), getSiteSettings(), getAiConfig()]);
   const chunks = retrieve(question, corpus);
   const sources = sourcesOf(chunks);
   // Public answers: short, factual, and never in (slower, pricier) thinking mode.
   const config = { ...aiConfig, thinking: false, temperature: 0.2 };
-  const messages = askMessages(site.name, question, chunks);
+  const messages = askMessages(site.name, question, chunks, language?.label);
   const key = cacheKey(config, messages, MAX_TOKENS);
 
   const encoder = new TextEncoder();

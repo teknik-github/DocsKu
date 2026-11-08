@@ -3,29 +3,33 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowUpRight, ChevronDown, Menu, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Languages, Menu, X } from "lucide-react";
 import { findTab, sectionPages, topicSlug } from "@/lib/navigation";
 import type { NavTab } from "@/lib/site-types";
+import { HUB_ANCHOR_LAYOUTS } from "@/lib/docs-layouts";
 import { Logo } from "@/components/logo";
 import { SearchIconButton } from "@/components/search";
 import { SidebarNav } from "@/components/sidebar";
 import { useSite } from "@/components/site-context";
 import { ThemeToggle } from "@/components/theme";
+import { hubHref, t } from "@/lib/i18n";
 
 const isExternal = (href: string) => /^https?:\/\//.test(href);
 
 export function SiteHeader() {
   const pathname = usePathname();
-  const { site, tabs } = useSite();
+  const { site, tabs, locale, i18n } = useSite();
   const activeTab = findTab(tabs, pathname);
   const layout = site.layout ?? "docs";
+  // The hub of the language being read: /docs, or /docs/<code>.
+  const hub = hubHref(locale, i18n?.defaultLocale ?? locale);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <header className="fixed inset-x-0 top-0 z-40 flex h-(--header-h) items-center gap-4 border-b border-line bg-page/90 px-4 backdrop-blur-md lg:px-5">
       <Logo name={site.name} />
 
-      <nav aria-label="Bagian dokumentasi" className="ml-4 hidden h-full items-center gap-1 lg:flex">
+      <nav aria-label={t(locale, "docSections")} className="ml-4 hidden h-full items-center gap-1 lg:flex">
         {tabs.map((tab) => {
           const active = activeTab?.title === tab.title;
           const className = `flex h-8 items-center gap-1 rounded-full px-3 text-sm whitespace-nowrap transition-colors ${
@@ -35,8 +39,14 @@ export function SiteHeader() {
           return (
             <Link
               key={tab.title}
-              // The Ghost layout opens the card hub filtered to this tab.
-              href={layout === "ghost" ? `/docs?topik=${topicSlug(tab.title)}` : tab.href}
+              // Ghost opens the card hub filtered to this tab; the help centre and magazine jump to its block on the hub.
+              href={
+                layout === "ghost"
+                  ? `${hub}?topik=${topicSlug(tab.title)}`
+                  : HUB_ANCHOR_LAYOUTS.includes(layout)
+                    ? `${hub}#${topicSlug(tab.title)}`
+                    : tab.href
+              }
               className={className}
             >
               {tab.title}
@@ -48,6 +58,7 @@ export function SiteHeader() {
 
       <div className="ml-auto flex items-center gap-1.5">
         <SearchIconButton />
+        <LanguageMenu />
         <ThemeToggle />
         {site.headerCta && (
           <Link
@@ -60,7 +71,7 @@ export function SiteHeader() {
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
-          aria-label="Buka menu"
+          aria-label={t(locale, "openMenu")}
           className="inline-flex size-8 items-center justify-center rounded-full text-fg-muted hover:bg-fill hover:text-fg lg:hidden"
         >
           <Menu className="size-4.5" />
@@ -128,8 +139,75 @@ function TabMenu({ tab, className }: { tab: NavTab; className: string }) {
   );
 }
 
+/** Shown when the site has extra languages: links to this page in each language, or to that language's hub. */
+function LanguageMenu() {
+  const pathname = usePathname();
+  const { locale, i18n } = useSite();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (!i18n?.languages.length) return null;
+  const all = [{ code: i18n.defaultLocale, label: i18n.defaultLabel }, ...i18n.languages];
+  const versions = i18n.alternates[pathname];
+  const current = all.find((language) => language.code === locale) ?? all[0];
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-label={`${t(locale, "language")}: ${current.label}`}
+        data-testid="language-menu"
+        className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-xs font-medium text-fg-muted uppercase transition-colors hover:bg-fill hover:text-fg"
+      >
+        <Languages className="size-4" />
+        {current.code}
+      </button>
+      {open && (
+        <div className="absolute top-full right-0 mt-2 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-lg">
+          <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">{t(locale, "language")}</p>
+          {all.map((language) => {
+            const translated = versions?.[language.code];
+            const href = translated ?? hubHref(language.code, i18n.defaultLocale);
+            return (
+              <Link
+                key={language.code}
+                href={href}
+                hrefLang={language.code}
+                lang={language.code}
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-fill"
+              >
+                <span className="flex-1">
+                  <span className="block text-fg">{language.label}</span>
+                  {!translated && pathname.startsWith("/docs/") && language.code !== locale && (
+                    <span className="block text-xs text-fg-subtle">{t(language.code, "translationMissing")}</span>
+                  )}
+                </span>
+                {language.code === locale && <Check className="size-3.5 text-accent" />}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ResourcesMenu() {
-  const { site } = useSite();
+  const { site, locale } = useSite();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -157,7 +235,7 @@ function ResourcesMenu() {
         aria-expanded={open}
         className="flex h-8 items-center gap-1 rounded-full px-3 text-sm text-fg-muted transition-colors hover:bg-fill/70 hover:text-fg"
       >
-        Sumber daya
+        {t(locale, "resources")}
         <ChevronDown className={`size-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
@@ -187,17 +265,17 @@ function ResourcesMenu() {
 }
 
 function MobileMenu({ tab, onClose }: { tab: NavTab | undefined; onClose: () => void }) {
-  const { site, tabs } = useSite();
+  const { site, tabs, locale } = useSite();
   return (
     <div className="fixed inset-0 z-50 lg:hidden">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute inset-y-0 right-0 flex w-[min(20rem,85vw)] flex-col border-l border-line bg-page">
         <div className="flex h-(--header-h) items-center justify-between border-b border-line px-4">
-          <span className="text-sm font-medium">Menu</span>
+          <span className="text-sm font-medium">{t(locale, "menu")}</span>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Tutup menu"
+            aria-label={t(locale, "closeMenu")}
             className="inline-flex size-8 items-center justify-center rounded-full text-fg-muted hover:bg-fill"
           >
             <X className="size-4.5" />

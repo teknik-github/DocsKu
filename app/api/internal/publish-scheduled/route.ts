@@ -4,6 +4,7 @@ import { db, schema } from "@/db";
 import { addToNavigation, readAutomation } from "@/lib/automation";
 import { authorizedInternal } from "@/lib/internal-auth";
 import { forgetRedirects } from "@/lib/redirects";
+import { logActivity, pruneActivity } from "@/lib/activity";
 
 /**
  * Publishes scheduled pages whose time has come. Called every minute by
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
         seo: sql`${schema.pages.draftSeo}`,
         coverImage: sql`${schema.pages.draftCoverImage}`,
         hasChanges: false,
+        reviewedAt: sql`now()`,
       })
       .where(and(eq(schema.pages.status, "scheduled"), lte(schema.pages.publishedAt, sql`now()`)))
       .returning({
@@ -58,6 +60,11 @@ export async function POST(request: Request) {
       if (page.kind === "doc" && (await addToNavigation(page.id, page.navSection))) navigationChanged = true;
     }
   }
+
+  for (const page of published) {
+    await logActivity({ user: null, action: "page.publish", target: { type: "page", id: page.id, label: page.kind === "home" ? "Beranda" : page.title }, meta: { scheduled: true } });
+  }
+  await pruneActivity();
 
   // Make the new pages visible right away rather than on the next background refresh.
   if (published.length) {

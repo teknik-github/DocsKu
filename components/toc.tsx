@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from "react";
 import type { Heading } from "@/lib/content/doc";
+import { useSite } from "@/components/site-context";
+import { t } from "@/lib/i18n";
 
 export function TableOfContents({ headings }: { headings: Heading[] }) {
+  const { locale } = useSite();
   const [activeId, setActiveId] = useState(headings[0]?.id);
 
   useEffect(() => {
@@ -35,8 +38,8 @@ export function TableOfContents({ headings }: { headings: Heading[] }) {
   if (headings.length === 0) return null;
 
   return (
-    <nav aria-label="Di halaman ini" className="text-sm">
-      <div className="mb-3 text-xs font-medium text-fg">Di halaman ini</div>
+    <nav aria-label={t(locale, "onThisPage")} className="text-sm">
+      <div className="mb-3 text-xs font-medium text-fg">{t(locale, "onThisPage")}</div>
       <ul className="space-y-0.5 border-l border-line">
         {headings.map((heading) => {
           const active = heading.id === activeId;

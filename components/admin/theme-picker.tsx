@@ -6,18 +6,10 @@ import { Check, ExternalLink } from "lucide-react";
 import { saveColorTheme, saveTheme } from "@/app/admin/_actions/site";
 import { COLOR_THEMES, type ColorThemeId } from "@/lib/color-themes";
 import { Alert, Button, Panel } from "@/components/admin/ui";
-import type { DocsLayout } from "@/lib/site-types";
+import { DOCS_LAYOUTS, type DocsLayout } from "@/lib/docs-layouts";
 
-/**
- * Themes for /docs. To add one: extend DocsLayout (lib/site-types.ts), the
- * enum in saveTheme, this list (with a sketch), and the branches in
- * app/(site)/docs/{layout,page}.tsx and [...slug]/page.tsx.
- */
-const LAYOUTS: { id: DocsLayout; label: string; description: string }[] = [
-  { id: "docs", label: "Dokumentasi", description: "Sidebar kiri dan daftar isi di kanan. Cocok untuk referensi yang dijelajahi." },
-  { id: "hybrid", label: "Hibrida", description: "Hub kartu per bagian; artikel di tengah dengan breadcrumb dan menu bagian." },
-  { id: "ghost", label: "Ghost (blog)", description: "Seperti demo.ghost.io: hero, filter, grid kartu dengan halaman unggulan." },
-];
+/** The /docs layouts; the list itself lives in lib/docs-layouts.ts (add a sketch below for a new one). */
+const LAYOUTS = DOCS_LAYOUTS;
 
 /** Tiny wireframe of each layout for the picker. */
 function LayoutSketch({ layout }: { layout: DocsLayout }) {
@@ -62,6 +54,103 @@ function LayoutSketch({ layout }: { layout: DocsLayout }) {
           </div>
         </div>
       )}
+      {layout === "helpcenter" && (
+        <div className="flex-1 space-y-1">
+          <div className="flex h-6 items-center justify-center rounded-sm bg-accent">
+            <div className="h-1.5 w-1/2 rounded-full bg-white/90" />
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex h-4 items-start gap-0.5 rounded-sm border border-line p-0.5">
+                <div className="size-1.5 rounded-[2px] bg-accent/60" />
+                <div className={`h-1 flex-1 ${bar}`} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {layout === "book" && (
+        <div className="flex flex-1 justify-center">
+          <div className="w-3/5 space-y-1">
+            <div className="mx-auto h-1.5 w-1/3 rounded-sm bg-accent/60" />
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-end gap-0.5">
+                <div className={`h-1 ${i % 2 ? "w-1/3" : "w-1/2"} ${bar}`} />
+                <div className="flex-1 border-b border-dotted border-fg-subtle/50" />
+                <div className="h-1 w-1 rounded-sm bg-fg-subtle/40" />
+              </div>
+            ))}
+            <div className="mt-1 h-3 rounded-sm border border-accent/50" />
+          </div>
+        </div>
+      )}
+      {layout === "minimal" && (
+        <div className="flex flex-1 justify-center">
+          <div className="w-1/2 space-y-1">
+            <div className="flex gap-0.5">
+              {[0, 1, 2].map((i) => <div key={i} className={`h-1.5 w-3 rounded-full ${i === 1 ? "bg-fg/50" : "border border-fg-subtle/40"}`} />)}
+            </div>
+            <div className="h-2 w-2/3 rounded-sm bg-fg/40" />
+            {[0, 1, 2, 3, 4].map((i) => <div key={i} className={`h-1 ${bar}`} style={{ width: `${100 - i * 9}%` }} />)}
+          </div>
+        </div>
+      )}
+      {layout === "wiki" && (
+        <div className="flex flex-1 gap-1">
+          <div className="w-1/4 space-y-0.5">
+            {[0, 1, 2, 3, 4, 5, 6].map((i) => <div key={i} className={`h-0.5 ${i % 3 === 0 ? "bg-fg/40" : bar}`} style={{ marginLeft: i % 3 === 0 ? 0 : 3 }} />)}
+          </div>
+          <div className="flex-1 space-y-0.5">
+            <div className="h-2 w-1/2 border-b border-line bg-fg/30" />
+            {[0, 1, 2, 3, 4, 5, 6].map((i) => <div key={i} className={`h-0.5 ${bar}`} />)}
+          </div>
+          <div className="w-1/5 space-y-0.5">
+            <div className="h-4 rounded-sm border border-line" />
+            {[0, 1, 2].map((i) => <div key={i} className={`h-0.5 ${bar}`} />)}
+          </div>
+        </div>
+      )}
+      {layout === "magazine" && (
+        <div className="flex-1 space-y-1">
+          <div className="mx-auto h-1.5 w-1/2 border-y border-fg/50" />
+          <div className="flex gap-1">
+            <div className="h-7 flex-1 bg-accent/35" />
+            <div className="w-1/4 space-y-1">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex gap-0.5">
+                  <div className="h-1.5 w-1 bg-accent/60" />
+                  <div className={`h-1 flex-1 ${bar}`} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-1">
+            {[0, 1, 2, 3].map((i) => <div key={i} className="h-2.5 bg-accent/20" />)}
+          </div>
+        </div>
+      )}
+      {layout === "developer" && (
+        <div className="flex flex-1 flex-col gap-1">
+          <div className="flex gap-1.5 border-b border-line pb-0.5">
+            {[0, 1, 2].map((i) => <div key={i} className={`h-1 w-4 rounded-sm ${i === 0 ? "bg-accent" : bar}`} />)}
+          </div>
+          <div className="flex flex-1 gap-1">
+            <div className="w-1/5 space-y-1">
+              {[0, 1, 2, 3].map((i) => <div key={i} className={`h-1 ${bar}`} />)}
+            </div>
+            <div className="flex-1 space-y-1">
+              <div className="h-1.5 w-1/2 rounded-sm bg-fg/40" />
+              <div className={`h-1 ${bar}`} />
+              <div className="h-3.5 rounded-sm bg-fg/70" />
+              <div className={`h-1 w-4/5 ${bar}`} />
+            </div>
+            <div className="w-1/5 space-y-1">
+              <div className="h-2.5 rounded-sm border border-line" />
+              {[0, 1].map((i) => <div key={i} className={`h-1 ${bar}`} />)}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -85,7 +174,7 @@ export function ThemePicker({ current }: { current: DocsLayout }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {LAYOUTS.map((option) => {
           const isSelected = selected === option.id;
           return (
@@ -123,7 +212,7 @@ export function ThemePicker({ current }: { current: DocsLayout }) {
           <ExternalLink className="size-3.5" />
         </Link>
         <span className="text-xs text-fg-subtle">
-          Tema Hibrida dan Ghost memakai gambar sampul halaman. Halaman tanpa sampul mendapat sampul otomatis.
+          Hibrida, Ghost, dan Majalah memakai gambar sampul halaman. Halaman tanpa sampul mendapat sampul otomatis.
         </span>
       </Panel>
     </div>

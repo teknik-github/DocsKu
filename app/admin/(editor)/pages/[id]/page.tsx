@@ -43,6 +43,7 @@ async function EditorLoader({ params }: Pick<PageProps<"/admin/pages/[id]">, "pa
         seo: page.draftSeo,
         cover: page.draftCoverImage,
         featured: page.featured,
+        visibility: page.visibility,
         updatedAt: page.updatedAt.toISOString(),
       }}
       revisions={revisions.map((revision) => ({ ...revision, createdAt: revision.createdAt.toISOString() }))}

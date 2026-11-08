@@ -4,6 +4,7 @@ import { updateTag } from "next/cache";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { logActivity } from "@/lib/activity";
 import { canEncrypt, decryptSecret, encryptSecret } from "@/lib/crypto";
 import { readStoredAi, toView, type AiConfig, type StoredAiSettings } from "@/lib/ai/config";
 import { AiError, completeChat, listModels } from "@/lib/ai/client";
@@ -65,6 +66,13 @@ export async function saveAiSettings(input: AiForm): Promise<Result<{ view: AiSe
     .onConflictDoUpdate({ target: schema.settings.key, set: { value: next } });
   // "Tanya AI" in the public search box depends on AI being ready.
   updateTag("settings");
+  // Never the key itself: only whether it changed.
+  await logActivity({
+    user,
+    action: "settings.save",
+    target: { type: "settings", id: "ai", label: "AI" },
+    meta: { model: next.model, enabled: next.enabled, ...(apiKey ? { key: "diganti" } : clearKey ? { key: "dihapus" } : {}) },
+  });
   return { ok: true, view: toView(next) };
 }
 
@@ -112,5 +120,6 @@ export async function saveAskAiSettings(input: AskAiSettings): Promise<Result> {
     .values({ key: "ask_ai", value: parsed.data })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value: parsed.data } });
   updateTag("settings");
+  await logActivity({ user, action: "settings.save", target: { type: "settings", id: "tanya-ai", label: "Tanya AI" }, meta: parsed.data });
   return { ok: true };
 }

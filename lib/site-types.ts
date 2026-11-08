@@ -6,16 +6,18 @@
 export type ExternalLink = { title: string; href: string; description?: string };
 
 /**
- * How /docs is presented: "docs" (sidebar + table of contents), "hybrid"
- * (card hub, centred articles with breadcrumb and section menu), or "ghost"
- * (blog style like demo.ghost.io: hero, filter chips, one card grid).
+ * How /docs is presented: "docs" (sidebar + table of contents), "hybrid",
+ * "ghost", and the others listed in lib/docs-layouts.ts.
  */
-export type DocsLayout = "docs" | "hybrid" | "ghost";
+import type { DocsLayout } from "@/lib/docs-layouts";
+export type { DocsLayout };
 
 export type SiteSettings = {
   layout?: DocsLayout;
   /** Colour theme id from lib/color-themes.ts (default "terakota"). Set in Tema. */
   colorTheme?: string;
+  /** Author byline, author box and /penulis pages (default on). Set in Tema → Penulis. */
+  showAuthors?: boolean;
   name: string;
   description: string;
   headerCta: { title: string; href: string } | null;
@@ -31,8 +33,9 @@ export type NavItemData =
   | { type: "group"; title: string; items: NavItemData[] };
 
 /** A section is also a category in Halaman and on the help-centre home; `image` replaces its automatic icon there. */
-export type NavSectionData = { id: string; title: string; image?: string; items: NavItemData[] };
-export type NavTabData = { id: string; title: string; sections: NavSectionData[] };
+/** `titles`: the title in other languages, by language code (Pengaturan → Bahasa). */
+export type NavSectionData = { id: string; title: string; titles?: Record<string, string>; image?: string; items: NavItemData[] };
+export type NavTabData = { id: string; title: string; titles?: Record<string, string>; sections: NavSectionData[] };
 export type NavigationData = { tabs: NavTabData[] };
 
 // ---- Resolved navigation (only published pages, with hrefs) ----
@@ -103,6 +106,13 @@ export type CommentSettings = {
   moderation: boolean;
 };
 
+/** Periodic content review (settings key "review"); pages can override the interval. */
+export type ReviewSettings = {
+  enabled: boolean;
+  /** Days after the last review (or publish) before a page is due again; 0 = pages without their own interval are never due. */
+  defaultIntervalDays: number;
+};
+
 /** "Tanya AI" in the public search box (settings key "ask_ai"). Works only while AI is set up. */
 export type AskAiSettings = {
   enabled: boolean;
@@ -110,6 +120,25 @@ export type AskAiSettings = {
   perMinute: number;
   /** Questions per day for the whole site (Asia/Jakarta); then search falls back to plain results. */
   dailyLimit: number;
+};
+
+/**
+ * The embeddable help widget (settings key "widget"): other sites add
+ * `<script src="…/widget.js">` and get a launcher that opens /widget in a frame.
+ */
+export type WidgetSettings = {
+  enabled: boolean;
+  /** Origins allowed to embed it ("https://app.example.com", "https://*.example.com"); empty = nobody. */
+  allowedOrigins: string[];
+  /** Launcher button text. */
+  label: string;
+  position: "right" | "left";
+  /** Launcher colour (#rrggbb); null = the colour theme's accent. */
+  accent: string | null;
+  /** First line inside the widget. */
+  greeting: string;
+  /** Offer Tanya AI there too (only while Tanya AI itself is available). */
+  ai: boolean;
 };
 
 /** A link button on the home page. */

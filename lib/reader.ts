@@ -55,7 +55,7 @@ export function isUncountedVisit(request: Request) {
 export async function recordView(slug: string) {
   await db.execute(sql`
     insert into page_views (page_id, day, views)
-    select id, ${today}, 1 from pages where slug = ${slug} and status = 'published' and kind = 'doc'
+    select id, ${today}, 1 from pages where slug = ${slug} and status = 'published' and kind = 'doc' and visibility = 'public'
     on conflict (page_id, day) do update set views = page_views.views + 1`);
 }
 
@@ -77,7 +77,7 @@ export async function recordSearch(query: string, found: boolean) {
 export async function recordFeedback(slug: string, helpful: boolean): Promise<string | null> {
   const rows = await db.execute<{ id: string }>(sql`
     insert into page_feedback (page_id, helpful)
-    select id, ${helpful} from pages where slug = ${slug} and status = 'published' and kind = 'doc'
+    select id, ${helpful} from pages where slug = ${slug} and status = 'published' and kind = 'doc' and visibility = 'public'
     returning id`);
   return rows[0]?.id ?? null;
 }

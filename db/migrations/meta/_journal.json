@@ -85,6 +85,27 @@
       "when": 1794062035349,
       "tag": "0011_ask_ai_queries",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794122823253,
+      "tag": "0012_security_review_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794123370764,
+      "tag": "0013_page_translations",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794132894085,
+      "tag": "0014_author_profiles",
+      "breakpoints": true
     }
   ]
 }

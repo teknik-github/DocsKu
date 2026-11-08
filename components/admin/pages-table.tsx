@@ -3,9 +3,10 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ExternalLink, FolderInput, Trash2 } from "lucide-react";
+import { ExternalLink, FolderInput, Globe, Lock, Trash2 } from "lucide-react";
 import { deletePages } from "@/app/admin/_actions/pages";
 import { movePagesToCategory } from "@/app/admin/_actions/categories";
+import { setPagesVisibility } from "@/app/admin/_actions/visibility";
 import type { CategoryGroup } from "@/lib/categories";
 import { formatDateTime } from "@/components/admin/format";
 import { Button, Panel, StatusBadge } from "@/components/admin/ui";
@@ -17,6 +18,8 @@ type Row = {
   title: string;
   status: "draft" | "scheduled" | "published";
   hasChanges: boolean;
+  /** "internal": readable only by signed-in team members. */
+  visibility?: "public" | "internal";
   publishedAt: string | null;
   updatedAt: string;
   updatedBy: string | null;
@@ -24,6 +27,10 @@ type Row = {
   category?: string | null;
   /** Not listed yet: joins its category when published. */
   pendingCategory?: boolean;
+  /** Set on a translation: its language code. */
+  locale?: string | null;
+  /** On an original: its translations, shown as language badges. */
+  translations?: { id: string; locale: string; status: "draft" | "scheduled" | "published"; outdated?: boolean }[];
 };
 
 const NO_CATEGORY = "__none";
@@ -59,6 +66,18 @@ export function PagesTable({
     setError("");
     startTransition(async () => {
       const result = await movePagesToCategory([...selected], target === NO_CATEGORY ? null : target);
+      if (!result.ok) setError(result.error);
+      else {
+        setSelected(new Set());
+        router.refresh();
+      }
+    });
+  }
+
+  function setVisibility(visibility: "public" | "internal") {
+    setError("");
+    startTransition(async () => {
+      const result = await setPagesVisibility([...selected], visibility);
       if (!result.ok) setError(result.error);
       else {
         setSelected(new Set());
@@ -121,6 +140,18 @@ export function PagesTable({
                 </select>
               </label>
             )}
+            {[...selected].some((id) => pages.find((p) => p.id === id)?.visibility !== "internal") && (
+              <Button variant="secondary" size="sm" onClick={() => setVisibility("internal")} disabled={pending} title="Hanya tim yang masuk yang bisa membaca">
+                <Lock className="size-3.5" />
+                Jadikan internal
+              </Button>
+            )}
+            {[...selected].some((id) => pages.find((p) => p.id === id)?.visibility === "internal") && (
+              <Button variant="secondary" size="sm" onClick={() => setVisibility("public")} disabled={pending}>
+                <Globe className="size-3.5" />
+                Jadikan publik
+              </Button>
+            )}
             <Button variant="danger" size="sm" onClick={removeSelected} disabled={pending}>
               <Trash2 className="size-3.5" />
               Hapus
@@ -163,8 +194,34 @@ export function PagesTable({
                 </td>
                 <td className="max-w-0 py-3 pr-4">
                   <Link href={`/admin/pages/${page.id}`} className="block">
-                    <span className="block truncate font-medium text-fg group-hover:text-accent">
-                      {page.title || "Tanpa judul"}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-medium text-fg group-hover:text-accent">{page.title || "Tanpa judul"}</span>
+                      {page.visibility === "internal" && (
+                        <span
+                          title="Artikel internal: hanya untuk tim yang masuk"
+                          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-200"
+                        >
+                          <Lock className="size-2.5" />
+                          Internal
+                        </span>
+                      )}
+                      {page.locale && (
+                        <span title={`Terjemahan (${page.locale})`} className="shrink-0 rounded bg-accent-soft px-1.5 py-0.5 font-mono text-[10px] font-semibold text-accent uppercase">
+                          {page.locale}
+                        </span>
+                      )}
+                      {page.translations?.map((translation) => (
+                        <span
+                          key={translation.id}
+                          data-testid="translation-badge"
+                          title={`Terjemahan ${translation.locale}: ${translation.status === "published" ? "terbit" : translation.status === "scheduled" ? "terjadwal" : "draf"}`}
+                          className={`shrink-0 rounded px-1 py-0.5 font-mono text-[10px] uppercase ${
+                            translation.status === "published" ? "bg-fill text-fg-muted" : "border border-dashed border-line text-fg-subtle"
+                          }`}
+                        >
+                          {translation.locale}
+                        </span>
+                      ))}
                     </span>
                     <span className="block truncate font-mono text-xs text-fg-subtle">/docs/{page.slug}</span>
                   </Link>

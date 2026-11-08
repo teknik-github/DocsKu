@@ -41,7 +41,18 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
-      { source: "/:path*", headers: securityHeaders },
+      // Everything except the help widget's pages (below), which other sites may frame.
+      { source: "/:path((?!widget(?:/|$)).*)", headers: securityHeaders },
+      {
+        // The help widget (/widget…): proxy.ts replaces this frame-ancestors with the origins set in
+        // Pengaturan → Widget bantuan; without the proxy it stays closed. No X-Frame-Options here:
+        // it can't list origins and would block every embed.
+        source: "/widget/:path*",
+        headers: [
+          ...securityHeaders.filter((header) => header.key !== "X-Frame-Options" && header.key !== "Content-Security-Policy"),
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+        ],
+      },
       // Uploaded files are served as passive images only (the later rule wins for the same key).
       { source: "/media/:file*", headers: [{ key: "Content-Security-Policy", value: "default-src 'none'; frame-ancestors 'none'" }] },
       // The home builder (/admin/home) shows this preview in a frame on the same site.

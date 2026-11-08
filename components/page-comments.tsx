@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MessageSquare, Reply } from "lucide-react";
+import { useSite } from "@/components/site-context";
+import { dateLocale, t } from "@/lib/i18n";
 
 type Comment = { id: string; parentId: string | null; name: string; body: string; staff: boolean; createdAt: string };
 /** `viewer` is set when a team member is signed in: they comment under their account name. */
 type Loaded = { enabled: boolean; moderation?: boolean; viewer?: { name: string } | null; comments: Comment[] };
 
 const AUTHOR_KEY = "docsku:comment-author";
-const relative = new Intl.RelativeTimeFormat("id-ID", { numeric: "auto" });
-const absolute = new Intl.DateTimeFormat("id-ID", { dateStyle: "long", timeStyle: "short" });
 
 async function fetchComments(slug: string) {
   const response = await fetch(`/api/comments?slug=${encodeURIComponent(slug)}`, { cache: "no-store" });
@@ -26,7 +26,8 @@ function savedAuthor() {
   }
 }
 
-function timeAgo(iso: string) {
+function timeAgo(iso: string, locale: string) {
+  const relative = new Intl.RelativeTimeFormat(dateLocale(locale), { numeric: "auto" });
   const seconds = (new Date(iso).getTime() - Date.now()) / 1000;
   const steps: [Intl.RelativeTimeFormatUnit, number][] = [
     ["year", 31_536_000],
@@ -37,7 +38,7 @@ function timeAgo(iso: string) {
     ["minute", 60],
   ];
   for (const [unit, size] of steps) if (Math.abs(seconds) >= size) return relative.format(Math.round(seconds / size), unit);
-  return "baru saja";
+  return t(locale, "justNow");
 }
 
 /**
@@ -50,6 +51,7 @@ export function PageComments({ slug }: { slug: string }) {
   const [data, setData] = useState<Loaded | null>(null);
   const [failed, setFailed] = useState(false);
   const [replyTo, setReplyTo] = useState<string | null>(null);
+  const { locale } = useSite();
 
   const load = () =>
     fetchComments(slug)
@@ -80,11 +82,11 @@ export function PageComments({ slug }: { slug: string }) {
     <section id="komentar" aria-labelledby="comments-title" data-testid="page-comments" className="not-prose mt-10 scroll-mt-24">
       <h2 id="comments-title" className="flex items-center gap-2 text-base font-semibold text-fg">
         <MessageSquare className="size-4 text-fg-subtle" />
-        Komentar{data.comments.length > 0 && <span className="text-sm font-normal text-fg-subtle tabular-nums">({data.comments.length})</span>}
+        {t(locale, "comments")}{data.comments.length > 0 && <span className="text-sm font-normal text-fg-subtle tabular-nums">({data.comments.length})</span>}
       </h2>
 
       {top.length === 0 ? (
-        <p className="mt-3 text-sm text-fg-subtle">Belum ada komentar. Jadilah yang pertama.</p>
+        <p className="mt-3 text-sm text-fg-subtle">{t(locale, "noComments")}</p>
       ) : (
         <ul className="mt-4 space-y-5" data-testid="comment-list">
           {top.map((comment) => (
@@ -110,10 +112,10 @@ export function PageComments({ slug }: { slug: string }) {
                     type="button"
                     onClick={() => setReplyTo(comment.id)}
                     className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg"
-                    aria-label={`Balas komentar ${comment.name}`}
+                    aria-label={t(locale, "replyTo", { name: comment.name })}
                   >
                     <Reply className="size-3" />
-                    Balas
+                    {t(locale, "reply")}
                   </button>
                 )}
               </div>
@@ -137,6 +139,8 @@ export function PageComments({ slug }: { slug: string }) {
 }
 
 function CommentItem({ comment }: { comment: Comment }) {
+  const { locale } = useSite();
+  const absolute = new Intl.DateTimeFormat(dateLocale(locale), { dateStyle: "long", timeStyle: "short" });
   return (
     <article className="flex gap-3" data-testid="comment">
       <span
@@ -150,9 +154,9 @@ function CommentItem({ comment }: { comment: Comment }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
           <span className="font-medium text-fg">{comment.name}</span>
-          {comment.staff && <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">Tim</span>}
+          {comment.staff && <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">{t(locale, "team")}</span>}
           <time dateTime={comment.createdAt} title={absolute.format(new Date(comment.createdAt))} className="text-xs text-fg-subtle">
-            {timeAgo(comment.createdAt)}
+            {timeAgo(comment.createdAt, locale)}
           </time>
         </div>
         <p className="mt-1 text-sm whitespace-pre-wrap break-words text-fg-muted">{comment.body}</p>
@@ -184,6 +188,7 @@ function CommentForm({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const id = parent ? `reply-${parent.id}` : `comment-${slug}`;
+  const { locale } = useSite();
 
   useEffect(() => {
     shownAt.current = Date.now();
@@ -210,14 +215,14 @@ function CommentForm({
     if (!response?.ok || !result?.status) {
       const text =
         response?.status === 429
-          ? "Terlalu banyak komentar. Coba lagi sebentar lagi."
+          ? t(locale, "commentTooMany")
           : result?.error === "fast"
-            ? "Tunggu sebentar, lalu kirim lagi."
+            ? t(locale, "commentTooFast")
             : result?.error === "disabled"
-              ? "Komentar sedang ditutup."
+              ? t(locale, "commentClosed")
               : response?.status === 400
-                ? "Periksa lagi: nama minimal 2 huruf, email harus valid jika diisi, dan komentar 2–2.000 karakter."
-                : "Komentar belum terkirim. Coba lagi sebentar lagi.";
+                ? t(locale, "commentInvalid")
+                : t(locale, "commentError");
       return setNotice({ tone: "error", text });
     }
     if (!viewer) {
@@ -230,7 +235,7 @@ function CommentForm({
     setBody("");
     setNotice({
       tone: "success",
-      text: result.status === "pending" ? "Terima kasih! Komentar Anda menunggu persetujuan." : "Komentar terkirim.",
+      text: t(locale, result.status === "pending" ? "commentPending" : "commentSent"),
     });
     onPosted(result.status);
   }
@@ -240,7 +245,7 @@ function CommentForm({
   return (
     <form onSubmit={submit} className="relative space-y-2 rounded-xl border border-line bg-surface/60 p-4" data-testid={parent ? "reply-form" : "comment-form"}>
       <label htmlFor={`${id}-body`} className="block text-sm font-medium text-fg">
-        {parent ? `Balas ${parent.name}` : "Tulis komentar"}
+        {parent ? t(locale, "replyTo", { name: parent.name }) : t(locale, "writeComment")}
       </label>
       <textarea
         id={`${id}-body`}
@@ -251,36 +256,36 @@ function CommentForm({
         minLength={2}
         maxLength={2000}
         rows={parent ? 3 : 4}
-        placeholder={parent ? "Tulis balasan…" : "Pertanyaan, koreksi, atau tambahan untuk halaman ini…"}
+        placeholder={t(locale, parent ? "replyPlaceholder" : "commentPlaceholder")}
         className={`${input} resize-y`}
       />
       {viewer ? (
         <p className="text-xs text-fg-muted" data-testid="comment-as">
-          Berkomentar sebagai <span className="font-medium text-fg">{viewer.name}</span>{" "}
-          <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">Tim</span>
+          {t(locale, "commentAs")} <span className="font-medium text-fg">{viewer.name}</span>{" "}
+          <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">{t(locale, "team")}</span>
         </p>
       ) : (
         <div className="grid gap-2 sm:grid-cols-2">
           <input
             name="name"
-            aria-label="Nama"
+            aria-label={t(locale, "name")}
             value={author.name}
             onChange={(e) => setAuthor({ ...author, name: e.target.value })}
             required
             minLength={2}
             maxLength={60}
-            placeholder="Nama"
+            placeholder={t(locale, "name")}
             autoComplete="name"
             className={input}
           />
           <input
             name="email"
             type="email"
-            aria-label="Email (opsional)"
+            aria-label={t(locale, "emailOptional")}
             value={author.email}
             onChange={(e) => setAuthor({ ...author, email: e.target.value })}
             maxLength={200}
-            placeholder="Email (opsional, tidak ditampilkan)"
+            placeholder={t(locale, "emailOptional")}
             autoComplete="email"
             className={input}
           />
@@ -296,19 +301,19 @@ function CommentForm({
       <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
         <p className="text-xs text-fg-subtle">
           {viewer
-            ? "Komentar Anda langsung tampil dengan label Tim."
+            ? t(locale, "commentTeamNote")
             : moderation
-              ? "Komentar tampil setelah disetujui tim dokumentasi."
-              : "Komentar langsung tampil. Komentar berisi tautan ditinjau dulu."}
+              ? t(locale, "commentModerated")
+              : t(locale, "commentOpen")}
         </p>
         <div className="flex gap-2">
           {onCancel && (
             <button type="button" onClick={onCancel} className="h-8 rounded-lg px-3 text-sm text-fg-muted hover:bg-fill hover:text-fg">
-              Batal
+              {t(locale, "cancel")}
             </button>
           )}
           <button type="submit" disabled={busy} className="h-8 rounded-lg bg-fg px-3 text-sm font-medium text-page hover:opacity-85 disabled:opacity-50">
-            {parent ? "Kirim balasan" : "Kirim komentar"}
+            {t(locale, parent ? "sendReply" : "sendComment")}
           </button>
         </div>
       </div>

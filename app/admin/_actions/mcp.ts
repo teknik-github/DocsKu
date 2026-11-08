@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { logActivity } from "@/lib/activity";
 import { canEncrypt, encryptSecret } from "@/lib/crypto";
 import {
   decryptHeaders,
@@ -37,7 +38,8 @@ export async function createApiToken(input: z.input<typeof tokenSchema>): Promis
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const scopes = [...new Set(parsed.data.scopes.filter(isMcpScope))];
   const expiresAt = parsed.data.days ? new Date(Date.now() + parsed.data.days * 86_400_000) : null;
-  const { token } = await issueToken(user.id, parsed.data.name, scopes, expiresAt);
+  const { id, token } = await issueToken(user.id, parsed.data.name, scopes, expiresAt);
+  await logActivity({ user, action: "token.create", target: { type: "token", id, label: parsed.data.name }, meta: { scopes, days: parsed.data.days } });
   return { ok: true, token };
 }
 
@@ -48,7 +50,8 @@ export async function revokeApiToken(id: string): Promise<Result> {
   if (!z.uuid().safeParse(id).success) return { ok: false, error: "Token tidak ditemukan." };
   const where =
     user.role === "admin" ? eq(schema.apiTokens.id, id) : and(eq(schema.apiTokens.id, id), eq(schema.apiTokens.userId, user.id));
-  const [deleted] = await db.delete(schema.apiTokens).where(where).returning({ id: schema.apiTokens.id });
+  const [deleted] = await db.delete(schema.apiTokens).where(where).returning({ id: schema.apiTokens.id, name: schema.apiTokens.name, userId: schema.apiTokens.userId });
+  if (deleted) await logActivity({ user, action: "token.revoke", target: { type: "token", id, label: deleted.name }, meta: deleted.userId !== user.id ? { owner: deleted.userId } : undefined });
   return deleted ? { ok: true } : { ok: false, error: "Token tidak ditemukan." };
 }
 
@@ -116,6 +119,8 @@ export async function saveMcpServer(input: McpServerForm): Promise<Result<{ serv
     checkedAt: new Date().toISOString(),
   };
   await writeMcpServers(existing ? servers.map((s) => (s.id === server.id ? server : s)) : [...servers, server]);
+  // Header values are secrets: only their names are logged.
+  await logActivity({ user, action: existing ? "mcp.update" : "mcp.create", target: { type: "mcp", id: server.id, label: server.name }, meta: { url: server.url, tools: server.tools.length, headers: server.headerNames } });
   return { ok: true, server: toServerView(server) };
 }
 
@@ -136,6 +141,7 @@ export async function setMcpEnabled(input: z.input<typeof toggleSchema>): Promis
       s.id !== id ? s : tool ? { ...s, tools: s.tools.map((t) => (t.name === tool ? { ...t, enabled } : t)) } : { ...s, enabled },
     ),
   );
+  await logActivity({ user, action: enabled ? "mcp.enable" : "mcp.disable", target: { type: "mcp", id, label: server.name }, meta: tool ? { tool } : undefined });
   return { ok: true };
 }
 
@@ -143,7 +149,9 @@ export async function deleteMcpServer(id: string): Promise<Result> {
   const user = await authorize("admin");
   if ("error" in user) return { ok: false, error: user.error };
   const servers = await readMcpServers();
-  if (!servers.some((s) => s.id === id)) return { ok: false, error: "Server tidak ditemukan." };
+  const server = servers.find((s) => s.id === id);
+  if (!server) return { ok: false, error: "Server tidak ditemukan." };
   await writeMcpServers(servers.filter((s) => s.id !== id));
+  await logActivity({ user, action: "mcp.delete", target: { type: "mcp", id, label: server.name } });
   return { ok: true };
 }
