@@ -29,7 +29,8 @@ test.describe("two-step login", () => {
     secret = (await page.getByTestId("totp-secret").textContent())!.trim();
     await page.getByLabel("Kode dari aplikasi").fill("000000");
     await page.getByRole("button", { name: "Aktifkan", exact: true }).click();
-    await expect(page.getByRole("alert")).toBeVisible();
+    // Not getByRole("alert") alone: Next's route announcer is an (empty) alert too.
+    await expect(page.getByRole("alert").filter({ hasText: "Kode salah" })).toBeVisible();
     await page.getByLabel("Kode dari aplikasi").fill(totp(secret));
     await page.getByRole("button", { name: "Aktifkan", exact: true }).click();
     await expect(page.getByText("Simpan kode pemulihan ini sekarang")).toBeVisible();

@@ -27,7 +27,9 @@ import {
   CardGroup,
   CodeBlockNode,
   CodeGroup,
+  Embed,
   Hero,
+  Mermaid,
   Step,
   Steps,
   Tab,
@@ -114,6 +116,8 @@ export function PageEditor({
   isAdmin = false,
   permissions = { publish: true, approve: true, staff: true, templates: true },
   viewer,
+  initialNote,
+  initialChat,
 }: {
   page: EditorPage;
   revisions: RevisionItem[];
@@ -124,6 +128,10 @@ export function PageEditor({
   isAdmin?: boolean;
   permissions?: EditorPermissions;
   viewer?: { id: string; name: string };
+  /** Opens the review panel on this internal note (?catatan= in the URL). */
+  initialNote?: string;
+  /** Opens AI Chat with this request typed in, not sent (Statistik → "Saran AI"). */
+  initialChat?: string;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(page.title);
@@ -143,13 +151,13 @@ export function PageEditor({
   /** What automation filled in on the last publish (lib/automation.ts). */
   const [autoNote, setAutoNote] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(Boolean(initialChat) && aiEnabled);
   /** "Periksa": writing checks and internal notes. */
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewTab, setReviewTab] = useState<ReviewTab>("quality");
+  const [reviewOpen, setReviewOpen] = useState(Boolean(initialNote));
+  const [reviewTab, setReviewTab] = useState<ReviewTab>(initialNote ? "notes" : "quality");
   /** Text picked with the bubble menu's note button, waiting for its note. */
   const [draftQuote, setDraftQuote] = useState<string | null>(null);
-  const [activeNote, setActiveNote] = useState<string | null>(null);
+  const [activeNote, setActiveNote] = useState<string | null>(initialNote ?? null);
   /** Opens one side panel and closes the others. */
   function openSide(side: "settings" | "chat" | "review" | null) {
     setPanelOpen(side === "settings");
@@ -290,6 +298,8 @@ export function PageEditor({
       CodeGroup,
       Accordion,
       Hero,
+      Embed,
+      Mermaid,
       BlockHover.configure({ bus: hoverBus }),
       NoteHighlights.configure({ onSelect: (id) => selectNote.current(id) }),
       SlashCommand.configure({
@@ -966,6 +976,7 @@ export function PageEditor({
             enabled={aiEnabled}
             getPage={currentPage}
             onApplyEdit={applyProposal}
+            initialInput={initialChat}
             onClose={() => setChatOpen(false)}
           />
         </aside>

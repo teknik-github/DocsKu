@@ -1,4 +1,4 @@
-import type { Node as PMNode } from "@tiptap/pm/model";
+import type { JSONContent } from "@tiptap/core";
 
 /**
  * Writing checks for the page editor ("Periksa" → Kualitas, and before
@@ -12,6 +12,54 @@ export type QualityLevel = "error" | "warn" | "info";
 export type QualityIssue = { id: string; level: QualityLevel; message: string; hint?: string; pos?: number };
 export type Readability = { words: number; sentences: number; avgSentence: number; longSentences: number; label: "Mudah" | "Sedang" | "Sulit" | "—"; minutes: number };
 export type QualityReport = { issues: QualityIssue[]; readability: Readability };
+
+/**
+ * What the checks read from a document node. A ProseMirror node (the editor)
+ * fits as it is; stored TipTap JSON (the page list) goes through `jsonNode`.
+ */
+export interface QNode {
+  type: { name: string };
+  attrs: Record<string, unknown>;
+  textContent: string;
+  text?: string | null;
+  marks: readonly { type: { name: string }; attrs: Record<string, unknown> }[];
+  descendants(f: (node: QNode, pos: number) => boolean | void): void;
+}
+
+/** Stored TipTap JSON as a QNode. Positions are a running count, unique per node (only the editor uses real ones, to jump). */
+export function jsonNode(json: JSONContent): QNode {
+  const children = (json.content ?? []).map(jsonNode);
+  const text = json.type === "text" ? (json.text ?? "") : undefined;
+  const node: QNode & { children: QNode[] } = {
+    type: { name: json.type ?? "" },
+    attrs: (json.attrs ?? {}) as Record<string, unknown>,
+    text,
+    children,
+    get textContent(): string {
+      return text ?? children.map((child) => child.textContent).join("");
+    },
+    marks: (json.marks ?? []).map((mark) => ({ type: { name: mark.type }, attrs: (mark.attrs ?? {}) as Record<string, unknown> })),
+    descendants(f) {
+      let pos = 0;
+      const walk = (list: QNode[]) => {
+        for (const child of list) {
+          if (f(child, pos++) !== false) walk((child as QNode & { children: QNode[] }).children);
+        }
+      };
+      walk(children);
+    },
+  };
+  return node;
+}
+
+/** 0–100 from the issues: an error costs 25, a warning 10, a hint 3. */
+export function qualityScore(report: QualityReport): number {
+  const cost = { error: 25, warn: 10, info: 3 } as const;
+  return Math.max(0, 100 - report.issues.reduce((sum, issue) => sum + cost[issue.level], 0));
+}
+
+export const QUALITY_GOOD = 85;
+export const QUALITY_FAIR = 60;
 
 const TITLE_MAX = 70;
 const DESCRIPTION_MIN = 50;
@@ -29,7 +77,7 @@ const sentencesIn = (text: string) =>
     .map((sentence) => sentence.trim())
     .filter((sentence) => wordsIn(sentence).length > 0);
 
-export function checkQuality(input: { title: string; description: string; seoTitle?: string; seoDescription?: string; doc: PMNode; isHome?: boolean }): QualityReport {
+export function checkQuality(input: { title: string; description: string; seoTitle?: string; seoDescription?: string; doc: QNode; isHome?: boolean }): QualityReport {
   const issues: QualityIssue[] = [];
   const add = (issue: QualityIssue) => issues.push(issue);
   const title = input.title.trim();

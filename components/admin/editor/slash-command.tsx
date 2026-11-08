@@ -23,6 +23,8 @@ import {
   Pilcrow,
   Sparkles,
   Quote,
+  Video,
+  Workflow,
   SquareCode,
   Table,
   type LucideIcon,
@@ -81,6 +83,8 @@ export function slashItems(requestImage: () => void, requestAi?: (pos: number) =
     { title: "Langkah", description: "Langkah-langkah bernomor", icon: ListChecks, keywords: "steps langkah tutorial", run: insert(templates.steps()) },
     { title: "Tab", description: "Konten dalam beberapa tab", icon: PanelTop, keywords: "tabs tab", run: insert(templates.tabs()) },
     { title: "Accordion", description: "Bagian yang bisa dibuka-tutup", icon: ChevronRight, keywords: "accordion faq lipat", run: insert(templates.accordion()) },
+    { title: "Video", description: "YouTube, Vimeo, atau Loom", icon: Video, keywords: "video youtube vimeo loom embed sematkan", run: insert(templates.embed()) },
+    { title: "Diagram", description: "Diagram alur Mermaid", icon: Workflow, keywords: "diagram mermaid flowchart alur bagan sequence", run: insert(templates.mermaid()) },
     { title: "Tabel", description: "Tabel 3×3", icon: Table, keywords: "table tabel", run: (e, r) => e.chain().focus().deleteRange(r).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run() },
     {
       title: "Gambar",

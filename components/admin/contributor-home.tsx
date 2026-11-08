@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { OpenNotes } from "@/components/admin/open-notes";
 import { and, desc, eq, or } from "drizzle-orm";
 import { ChevronRight, Clock, FilePen, MessageSquareWarning, Plus, Sparkles } from "lucide-react";
 import { db, schema } from "@/db";
@@ -80,6 +81,7 @@ export async function ContributorHome({ user, greeting, today }: { user: Session
             </ul>
           </Panel>
         )}
+        <OpenNotes userId={user.id} className="lg:col-span-2" />
         <Panel>
           <h2 className="flex items-center gap-2 border-b border-line px-5 py-3 text-sm font-medium text-fg">
             <Clock className="size-4 text-sky-600 dark:text-sky-400" />

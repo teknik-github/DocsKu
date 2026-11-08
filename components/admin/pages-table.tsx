@@ -12,6 +12,7 @@ import { formatDateTime } from "@/components/admin/format";
 import { Button, Panel, StatusBadge } from "@/components/admin/ui";
 import { confirmDialog } from "@/components/admin/dialog";
 import { Avatar } from "@/components/avatar";
+import { QUALITY_FAIR, QUALITY_GOOD } from "@/components/admin/editor/quality";
 
 type Row = {
   id: string;
@@ -36,6 +37,8 @@ type Row = {
   approvalStatus?: string | null;
   /** People with the page open in the editor right now. */
   editing?: { name: string; avatar: string | null }[];
+  /** Writing-check score of the working copy (0–100) and its warnings. */
+  quality?: { score: number; issues: string[] };
 };
 
 const NO_CATEGORY = "__none";
@@ -268,6 +271,7 @@ export function PagesTable({
                   {page.hasChanges && (
                     <span className="ml-1.5 text-[11px] text-amber-600 dark:text-amber-400">• ada perubahan</span>
                   )}
+                  {page.quality && <QualityBadge quality={page.quality} />}
                   {page.pendingCategory && (
                     <span className="mt-0.5 block text-xs text-fg-subtle">masuk kategori saat terbit</span>
                   )}
@@ -298,5 +302,21 @@ export function PagesTable({
         </table>
       </div>
     </Panel>
+  );
+}
+
+/** Writing-check score: green from 85, amber from 60, red below; the warnings show on hover. */
+function QualityBadge({ quality }: { quality: { score: number; issues: string[] } }) {
+  const tone =
+    quality.score >= QUALITY_GOOD
+      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+      : quality.score >= QUALITY_FAIR
+        ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+        : "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300";
+  const title = quality.issues.length ? `Kualitas ${quality.score}/100:\n• ${quality.issues.join("\n• ")}` : `Kualitas ${quality.score}/100: tidak ada masalah`;
+  return (
+    <span title={title} data-testid="quality-score" className={`mt-0.5 ml-0 block w-fit rounded-full px-1.5 py-px text-[11px] font-medium tabular-nums ${tone}`}>
+      Kualitas {quality.score}
+    </span>
   );
 }

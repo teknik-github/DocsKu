@@ -21,6 +21,7 @@ import {
 } from "@/lib/data/stats";
 import { StatsFeedback } from "@/components/admin/stats-feedback";
 import { Panel } from "@/components/admin/ui";
+import { isAiReady } from "@/lib/ai/config";
 
 export const metadata = { title: "Statistik" };
 
@@ -44,7 +45,7 @@ async function Stats({ searchParams }: Pick<PageProps<"/admin/stats">, "searchPa
   const params = await searchParams;
   const range: Range = RANGES.find((r) => String(r) === params.range) ?? 30;
   const filter: FeedbackFilter = FEEDBACK_FILTERS.find((f) => f === params.feedback) ?? "open";
-  const [overview, pages, searches, asks, feedback, feedbackCounts, engagement, flow] = await Promise.all([
+  const [overview, pages, searches, asks, feedback, feedbackCounts, engagement, flow, aiReady] = await Promise.all([
     getStatsOverview(range),
     getTopPages(range),
     getSearchStats(range),
@@ -53,6 +54,7 @@ async function Stats({ searchParams }: Pick<PageProps<"/admin/stats">, "searchPa
     getFeedbackCounts(),
     getEngagement(range),
     getSearchFlow(range),
+    isAiReady(),
   ]);
   const href = (next: { range?: Range; feedback?: FeedbackFilter }) => `/admin/stats?range=${next.range ?? range}&feedback=${next.feedback ?? filter}`;
   const change = overview.previous ? Math.round(((overview.views - overview.previous) / overview.previous) * 100) : null;
@@ -184,7 +186,7 @@ async function Stats({ searchParams }: Pick<PageProps<"/admin/stats">, "searchPa
         )}
       </Panel>
 
-      <EngagementPanel range={range} engagement={engagement} />
+      <EngagementPanel range={range} engagement={engagement} ai={aiReady} />
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-2">
         <QueryPanel
@@ -203,7 +205,7 @@ async function Stats({ searchParams }: Pick<PageProps<"/admin/stats">, "searchPa
         />
       </div>
 
-      <SearchFlowPanel flow={flow} />
+      <SearchFlowPanel flow={flow} ai={aiReady} />
 
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3">
@@ -369,7 +371,7 @@ const duration = (seconds: number) => {
  * visible, and how often readers left the site from the page, with a small
  * 25/50/75/100% funnel per page.
  */
-function EngagementPanel({ range, engagement }: { range: Range; engagement: Awaited<ReturnType<typeof getEngagement>> }) {
+function EngagementPanel({ range, engagement, ai }: { range: Range; engagement: Awaited<ReturnType<typeof getEngagement>>; ai: boolean }) {
   const { pages, reads } = engagement;
   return (
     <Panel data-testid="engagement">
@@ -406,14 +408,15 @@ function EngagementPanel({ range, engagement }: { range: Range; engagement: Awai
                 <th className="px-3 py-2 text-right font-normal">Dibaca</th>
                 <th className="px-3 py-2 font-normal">Sampai 25 · 50 · 75 · 100%</th>
                 <th className="px-3 py-2 text-right font-normal">Rata-rata waktu</th>
-                <th className="px-5 py-2 text-right font-normal" title="Kunjungan yang meninggalkan situs dari halaman ini">
+                <th className="px-3 py-2 text-right font-normal" title="Kunjungan yang meninggalkan situs dari halaman ini">
                   Keluar situs
                 </th>
+                {ai && <th className="px-5 py-2 font-normal"><span className="sr-only">Saran AI</span></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
               {pages.map((page) => (
-                <EngagementRowView key={page.id} page={page} />
+                <EngagementRowView key={page.id} page={page} ai={ai} />
               ))}
             </tbody>
           </table>
@@ -423,7 +426,10 @@ function EngagementPanel({ range, engagement }: { range: Range; engagement: Awai
   );
 }
 
-function EngagementRowView({ page }: { page: EngagementRow }) {
+/** A page worth a look: few readers reach the end, or many leave the site from it. */
+const struggling = (page: EngagementRow) => page.reads >= 3 && (percent(page.depth100, page.reads) < 50 || percent(page.exits, page.reads) >= 60);
+
+function EngagementRowView({ page, ai }: { page: EngagementRow; ai: boolean }) {
   const steps = [page.depth25, page.depth50, page.depth75, page.depth100];
   const exitRate = percent(page.exits, page.reads);
   return (
@@ -445,13 +451,26 @@ function EngagementRowView({ page }: { page: EngagementRow }) {
         </div>
       </td>
       <td className="px-3 py-2.5 text-right text-fg-muted tabular-nums">{duration(page.seconds / Math.max(1, page.reads))}</td>
-      <td className={`px-5 py-2.5 text-right tabular-nums ${exitRate >= 60 ? "text-red-600 dark:text-red-400" : "text-fg-muted"}`}>{exitRate}%</td>
+      <td className={`px-3 py-2.5 text-right tabular-nums ${exitRate >= 60 ? "text-red-600 dark:text-red-400" : "text-fg-muted"}`}>{exitRate}%</td>
+      {ai && (
+        <td className="px-5 py-2.5 text-right">
+          <Link
+            href={`/admin/pages/${page.id}?saran=baca`}
+            title="Buka halaman ini di editor dengan permintaan saran perbaikan untuk AI Chat (belum dikirim)"
+            data-testid="reading-advice"
+            className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] whitespace-nowrap hover:bg-accent-soft ${struggling(page) ? "font-medium text-accent" : "text-fg-subtle"}`}
+          >
+            <Sparkles className="size-3" />
+            Saran AI
+          </Link>
+        </td>
+      )}
     </tr>
   );
 }
 
 /** Search → article: which result each query led to, and searches that found results but were never followed. */
-function SearchFlowPanel({ flow }: { flow: Awaited<ReturnType<typeof getSearchFlow>> }) {
+function SearchFlowPanel({ flow, ai }: { flow: Awaited<ReturnType<typeof getSearchFlow>>; ai: boolean }) {
   return (
     <Panel data-testid="search-flow">
       <div className="border-b border-line px-5 py-3">
@@ -495,6 +514,16 @@ function SearchFlowPanel({ flow }: { flow: Awaited<ReturnType<typeof getSearchFl
                     {row.query}
                   </span>
                   <span className="text-xs text-fg-subtle tabular-nums">{number.format(row.searches)}×</span>
+                  {ai && (
+                    <Link
+                      href={`/admin/ai?saran=klik&q=${encodeURIComponent(row.query)}`}
+                      title="Minta AI menyarankan judul atau halaman yang lebih jelas (belum dikirim)"
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent-soft"
+                    >
+                      <Sparkles className="size-3" />
+                      Saran
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>

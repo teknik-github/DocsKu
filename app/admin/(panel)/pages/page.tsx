@@ -4,8 +4,9 @@ import { FileQuestion, Files, LayoutTemplate, ListTree, Lock, Plus, Search, Uplo
 import { NewPageButton } from "@/components/admin/new-page-button";
 import { requireUser } from "@/lib/auth/dal";
 import { can } from "@/lib/auth/permissions";
+import { QUALITY_GOOD } from "@/components/admin/editor/quality";
 import { presenceByPage } from "@/lib/collab/presence";
-import { listPages } from "@/lib/data/admin";
+import { listPages, pageQuality } from "@/lib/data/admin";
 import { readNavigation } from "@/lib/automation";
 import { categoryGroups, listedIn, type Category } from "@/lib/categories";
 import { categoryIcon } from "@/lib/category-icon";
@@ -59,7 +60,10 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
   const approvalOnly = params.persetujuan === "1";
   const q = typeof params.q === "string" ? params.q.trim() : "";
   const [navigation, everyPage, languages] = await Promise.all([readNavigation(), listPages({ ownedBy: staff ? undefined : user.id }), readLanguages()]);
-  const editing = await presenceByPage(everyPage.map((page) => page.id));
+  const [editing, quality] = await Promise.all([presenceByPage(everyPage.map((page) => page.id)), pageQuality(everyPage.map((page) => page.id))]);
+  /** `?kualitas=perbaiki`: pages whose writing checks score below "Baik". */
+  const weakOnly = params.kualitas === "perbaiki";
+  const weak = (page: { id: string }) => (quality.get(page.id)?.score ?? 100) < QUALITY_GOOD;
   // Translations are listed under their original (badges), or on their own with ?bahasa=<code>.
   const language = languages.languages.find((l) => l.code === params.bahasa)?.code ?? null;
   const translationsOf = new Map<string, typeof everyPage>();
@@ -106,6 +110,7 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
     (page) =>
       (!status || page.status === status) &&
       (!approvalOnly || (staff ? page.approvalStatus === "pending" : Boolean(page.approvalStatus))) &&
+      (!weakOnly || weak(page)) &&
       (!term || page.title.toLowerCase().includes(term) || page.slug.toLowerCase().includes(term)) &&
       (selected === ALL || (categoryOf(page) ?? NONE) === selected),
   );
@@ -116,7 +121,7 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
     pages = [...pages].sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
   }
 
-  const href = (next: { kategori?: string; status?: PageStatus | null; bahasa?: string | null; persetujuan?: boolean }) => {
+  const href = (next: { kategori?: string; status?: PageStatus | null; bahasa?: string | null; persetujuan?: boolean; kualitas?: boolean }) => {
     const query = new URLSearchParams();
     const kategori = next.kategori ?? selected;
     if (kategori !== ALL) query.set("kategori", kategori);
@@ -124,6 +129,7 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
     const s = next.status === undefined ? (approval ? undefined : status) : next.status;
     if (s) query.set("status", s);
     if (approval) query.set("persetujuan", "1");
+    if (next.kualitas ?? (next.status === undefined && next.persetujuan === undefined ? weakOnly : false)) query.set("kualitas", "perbaiki");
     if (q) query.set("q", q);
     const b = next.bahasa === undefined ? language : next.bahasa;
     if (b) query.set("bahasa", b);
@@ -146,6 +152,7 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
   );
 
   const approvalCount = allPages.filter((page) => (staff ? page.approvalStatus === "pending" : Boolean(page.approvalStatus))).length;
+  const weakCount = allPages.filter(weak).length;
 
   return (
     <>
@@ -262,9 +269,9 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
             {FILTERS.map((filter) => (
               <Link
                 key={filter.label}
-                href={href({ status: filter.status ?? null, persetujuan: false })}
+                href={href({ status: filter.status ?? null, persetujuan: false, kualitas: false })}
                 className={`rounded-md px-3 py-1 text-sm transition-colors ${
-                  !approvalOnly && filter.status === status ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
+                  !approvalOnly && !weakOnly && filter.status === status ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
                 }`}
               >
                 {filter.label}
@@ -279,6 +286,17 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
             >
               {staff ? "Menunggu persetujuan" : "Diajukan"}
               {approvalCount > 0 && <span className="rounded-full bg-accent px-1.5 text-[10px] font-semibold text-white tabular-nums">{approvalCount}</span>}
+            </Link>
+            <Link
+              href={href({ status: null, persetujuan: false, kualitas: true })}
+              data-testid="quality-filter"
+              title="Halaman dengan skor pemeriksaan tulisan di bawah 85"
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors ${
+                weakOnly ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
+              }`}
+            >
+              Perlu perbaikan
+              {weakCount > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold text-white tabular-nums">{weakCount}</span>}
             </Link>
           </div>
           {languages.languages.length > 0 && (
@@ -322,6 +340,7 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
               pendingCategory: !page.translationOf && Boolean(category) && !listed.has(page.id),
               locale: page.translationOf ? page.locale : null,
               editing: editing.get(page.id),
+              quality: quality.get(page.id),
               translations: page.translationOf
                 ? undefined
                 : (translationsOf.get(page.id) ?? []).map((t) => ({ id: t.id, locale: t.locale, status: t.status })),

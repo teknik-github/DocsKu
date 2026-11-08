@@ -8,7 +8,10 @@ import {
   ReactNodeViewRenderer,
   type NodeViewProps,
 } from "@tiptap/react";
+import { useEffect, useState } from "react";
 import { ChevronRight, Plus, Trash2 } from "lucide-react";
+import { parseEmbed } from "@/lib/content/embed";
+import { MermaidDiagram } from "@/components/blocks/mermaid";
 import { calloutVariants, type CalloutVariant } from "@/components/blocks/callout";
 import { Icon, iconNames } from "@/components/icon";
 
@@ -546,7 +549,116 @@ export const CodeGroup = Node.create({
 });
 
 /** Ready-made content for the "/" menu. */
+// ---------- Video (embed) ----------
+
+function EmbedView(props: NodeViewProps) {
+  const url = String(props.node.attrs.url ?? "");
+  const info = parseEmbed(url);
+  return (
+    <BlockFrame
+      label="Video"
+      onDelete={props.deleteNode}
+      controls={info ? <span className="text-[11px] text-fg-subtle">{info.label}</span> : null}
+    >
+      <div contentEditable={false} className="space-y-2">
+        <input
+          value={url}
+          onChange={(e) => props.updateAttributes({ url: e.target.value.trim() })}
+          placeholder="Tempel tautan YouTube, Vimeo, atau Loom"
+          aria-label="Tautan video"
+          className={`${smallInput} w-full font-mono`}
+        />
+        {url && !info && <p className="text-xs text-amber-700 dark:text-amber-400">Hanya YouTube, Vimeo, dan Loom yang bisa disematkan. Tautan lain tampil sebagai tautan biasa.</p>}
+        {info && (
+          <div className="relative aspect-video overflow-hidden rounded-lg border border-line bg-fill">
+            <iframe src={info.src} title="Pratinjau video" loading="lazy" className="pointer-events-none absolute inset-0 size-full" />
+          </div>
+        )}
+        <input
+          value={props.node.attrs.caption ?? ""}
+          onChange={(e) => props.updateAttributes({ caption: e.target.value || null })}
+          placeholder="Keterangan (opsional)"
+          aria-label="Keterangan video"
+          className={`${smallInput} w-full`}
+        />
+      </div>
+    </BlockFrame>
+  );
+}
+
+export const Embed = Node.create({
+  name: "embed",
+  group: "block",
+  atom: true,
+  selectable: true,
+  draggable: true,
+  addAttributes: () => ({ url: { default: "" }, caption: { default: null } }),
+  parseHTML: () => [{ tag: 'div[data-type="embed"]' }],
+  renderHTML: ({ HTMLAttributes }) => ["div", mergeAttributes(HTMLAttributes, { "data-type": "embed" })],
+  addNodeView: () => ReactNodeViewRenderer(EmbedView),
+});
+
+// ---------- Mermaid diagram ----------
+
+function MermaidView(props: NodeViewProps) {
+  const code = String(props.node.attrs.code ?? "");
+  // Redraw the preview once typing pauses, not on every key.
+  const [preview, setPreview] = useState(code);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPreview(code), 500);
+    return () => window.clearTimeout(timer);
+  }, [code]);
+  return (
+    <BlockFrame
+      label="Diagram (Mermaid)"
+      onDelete={props.deleteNode}
+      controls={
+        <a href="https://mermaid.js.org/intro/syntax-reference.html" target="_blank" rel="noreferrer" className="text-[11px] text-accent hover:underline">
+          Panduan sintaks
+        </a>
+      }
+    >
+      <div contentEditable={false} className="space-y-2">
+        <textarea
+          value={code}
+          onChange={(e) => props.updateAttributes({ code: e.target.value })}
+          onKeyDown={(e) => e.stopPropagation()}
+          spellCheck={false}
+          rows={Math.min(16, Math.max(4, code.split("\n").length + 1))}
+          aria-label="Kode diagram Mermaid"
+          className={`${smallInput} h-auto w-full resize-y py-1.5 font-mono leading-relaxed`}
+        />
+        <input
+          value={props.node.attrs.caption ?? ""}
+          onChange={(e) => props.updateAttributes({ caption: e.target.value || null })}
+          placeholder="Keterangan (opsional)"
+          aria-label="Keterangan diagram"
+          className={`${smallInput} w-full`}
+        />
+        {preview.trim() && <MermaidDiagram code={preview} />}
+      </div>
+    </BlockFrame>
+  );
+}
+
+export const Mermaid = Node.create({
+  name: "mermaid",
+  group: "block",
+  atom: true,
+  selectable: true,
+  draggable: true,
+  addAttributes: () => ({ code: { default: "" }, caption: { default: null } }),
+  parseHTML: () => [{ tag: 'div[data-type="mermaid"]' }],
+  renderHTML: ({ HTMLAttributes }) => ["div", mergeAttributes(HTMLAttributes, { "data-type": "mermaid" })],
+  addNodeView: () => ReactNodeViewRenderer(MermaidView),
+});
+
 export const templates = {
+  embed: (): JSONContent => ({ type: "embed", attrs: { url: "", caption: null } }),
+  mermaid: (): JSONContent => ({
+    type: "mermaid",
+    attrs: { code: "flowchart LR\n  A[Tulis] --> B{Tinjau}\n  B -->|Setuju| C[Terbit]\n  B -->|Revisi| A", caption: null },
+  }),
   callout: (): JSONContent => ({ type: "callout", attrs: { variant: "note" }, content: [paragraph()] }),
   cards: (): JSONContent => ({
     type: "cardGroup",

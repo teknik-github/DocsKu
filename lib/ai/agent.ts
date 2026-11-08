@@ -102,7 +102,9 @@ export const COMPONENTS = `Komponen yang bisa dipakai di isi halaman (tulis pers
 - Tab: <Tabs> <Tab title="…">isi</Tab> … </Tabs>
 - Grup kode: <CodeGroup> berisi beberapa blok kode berpagar dengan title="…" </CodeGroup>
 - Accordion: <Accordion title="…">isi</Accordion>
-- Blok kode: \`\`\`bahasa title="nama-file" lalu kode, ditutup \`\`\``;
+- Blok kode: \`\`\`bahasa title="nama-file" lalu kode, ditutup \`\`\`
+- Diagram: \`\`\`mermaid title="keterangan" lalu kode Mermaid (flowchart, sequenceDiagram, dll.), ditutup \`\`\`; pakai untuk alur atau arsitektur yang lebih jelas digambar
+- Video: <Video src="https://www.youtube.com/watch?v=…" title="keterangan" /> (YouTube, Vimeo, Loom); hanya bila pengguna memberi tautannya, jangan mengarang URL`;
 
 /**
  * Context about the page open in the editor. It changes as the user edits, so it

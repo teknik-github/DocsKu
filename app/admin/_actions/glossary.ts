@@ -1,7 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { updateTag } from "next/cache";
 import { z } from "zod";
 import { db, schema } from "@/db";
@@ -9,6 +9,10 @@ import { authorize } from "@/lib/auth/dal";
 import { logActivity } from "@/lib/activity";
 import { DEFAULT_GLOSSARY } from "@/lib/data/site";
 import type { GlossarySettings, GlossaryTerm } from "@/lib/site-types";
+import { configReady, getAiConfig } from "@/lib/ai/config";
+import { completeChat } from "@/lib/ai/client";
+import { toMarkdown } from "@/lib/content/markdown";
+import { parseSuggestions, suggestionPrompt, type GlossarySuggestion } from "@/lib/glossary-suggest";
 
 type Result = { ok: true; glossary: GlossarySettings } | { ok: false; error: string };
 
@@ -106,4 +110,80 @@ export async function setGlossaryTooltips(tooltips: boolean): Promise<Result> {
   await writeGlossary(next);
   await logActivity({ user, action: "glossary.settings", meta: { tooltips: next.tooltips } });
   return { ok: true, glossary: next };
+}
+
+/** How much of the docs the AI reads for suggestions. */
+const SUGGEST_PAGES = 40;
+const SUGGEST_PAGE_CHARS = 2_500;
+const SUGGEST_TOTAL_CHARS = 40_000;
+
+/**
+ * Glosarium → "Usulkan dengan AI": terms from the published docs that readers may not know,
+ * with definitions. Nothing is saved; the person picks which ones to add.
+ */
+export async function suggestGlossaryTerms(): Promise<{ ok: true; suggestions: GlossarySuggestion[] } | { ok: false; error: string }> {
+  const user = await authorize("glossary.manage");
+  if ("error" in user) return { ok: false, error: user.error };
+  const config = await getAiConfig();
+  if (!configReady(config)) return { ok: false, error: "AI belum diatur. Isi API key di Pengaturan → AI." };
+  const rows = await db
+    .select({ title: schema.pages.title, content: schema.pages.content })
+    .from(schema.pages)
+    .where(and(eq(schema.pages.status, "published"), eq(schema.pages.kind, "doc"), eq(schema.pages.visibility, "public"), isNull(schema.pages.translationOf)))
+    .orderBy(desc(schema.pages.publishedAt))
+    .limit(SUGGEST_PAGES);
+  if (!rows.length) return { ok: false, error: "Belum ada halaman terbit untuk dibaca AI." };
+  let budget = SUGGEST_TOTAL_CHARS;
+  const pages = rows.flatMap((row) => {
+    if (budget <= 0) return [];
+    const markdown = toMarkdown(row.content).slice(0, Math.min(SUGGEST_PAGE_CHARS, budget));
+    budget -= markdown.length;
+    return [{ title: row.title, markdown }];
+  });
+  const glossary = await readGlossary();
+  try {
+    const reply = await completeChat(
+      config,
+      [
+        { role: "system", content: "Anda menyusun glosarium untuk situs dokumentasi. Balas HANYA dengan satu objek JSON, tanpa teks lain." },
+        { role: "user", content: suggestionPrompt(glossary.terms, pages) },
+      ],
+      config.thinking ? 6000 : 2500,
+      90_000,
+    );
+    const suggestions = parseSuggestions(reply, glossary.terms);
+    if (!suggestions.length) return { ok: false, error: "AI tidak menemukan istilah baru. Coba lagi nanti, atau tambahkan istilah secara manual." };
+    return { ok: true, suggestions };
+  } catch (error) {
+    return { ok: false, error: `AI gagal menjawab: ${(error as Error).message}` };
+  }
+}
+
+/** Adds several terms at once (picked from the AI suggestions); clashing ones are skipped and reported. */
+export async function addGlossaryTerms(items: { term: string; aliases?: string[]; definition: string }[]): Promise<(Result & { added?: number; skipped?: string[] })> {
+  const user = await authorize("glossary.manage");
+  if ("error" in user) return { ok: false, error: user.error };
+  if (!Array.isArray(items) || items.length === 0 || items.length > 50) return { ok: false, error: "Pilih istilah yang ingin ditambahkan." };
+  const glossary = await readGlossary();
+  const terms = [...glossary.terms];
+  const skipped: string[] = [];
+  for (const item of items) {
+    const parsed = termSchema.safeParse(item);
+    if (!parsed.success) {
+      skipped.push(String(item?.term ?? ""));
+      continue;
+    }
+    const aliases = [...new Map(parsed.data.aliases.filter((alias) => keyOf(alias) !== keyOf(parsed.data.term)).map((alias) => [keyOf(alias), alias])).values()];
+    if (terms.length >= MAX_TERMS || clash(terms, { term: parsed.data.term, aliases })) {
+      skipped.push(parsed.data.term);
+      continue;
+    }
+    terms.push({ id: randomUUID().slice(0, 8), term: parsed.data.term, aliases, definition: parsed.data.definition });
+  }
+  const added = terms.length - glossary.terms.length;
+  if (added === 0) return { ok: false, error: "Tidak ada istilah yang bisa ditambahkan (semuanya sudah ada atau tidak valid)." };
+  const next = { ...glossary, terms };
+  await writeGlossary(next);
+  await logActivity({ user, action: "glossary.create", target: { type: "glossary", id: "ai", label: `${added} istilah dari usulan AI` }, meta: { added, via: "ai" } });
+  return { ok: true, glossary: next, added, skipped };
 }

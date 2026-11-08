@@ -211,6 +211,8 @@ function block(node: MdNode): JSONContent[] {
     case "blockquote":
       return [{ type: "blockquote", content: blockContent(node.children) }];
     case "code":
+      // ```mermaid fences become diagrams; "title" in the meta is the caption.
+      if (node.lang === "mermaid") return [{ type: "mermaid", attrs: { code: node.value ?? "", caption: parseCodeMeta(node.meta).title ?? null } }];
       return [codeBlock(node)];
     case "thematicBreak":
       return [{ type: "horizontalRule" }];
@@ -280,6 +282,15 @@ function jsxBlock(node: MdNode): JSONContent[] {
       return [{ type: "codeGroup", content: children.filter((c) => c.type === "code").map(codeBlock) }];
     case "Accordion":
       return [{ type: "accordion", attrs: { title: attrOf(node, "title") ?? "" }, content: blockContent(children) }];
+    case "Video":
+    case "Embed": {
+      const url = attrOf(node, "src") ?? attrOf(node, "url");
+      return url ? [{ type: "embed", attrs: { url, caption: attrOf(node, "title") ?? attrOf(node, "caption") ?? null } }] : [];
+    }
+    case "Mermaid": {
+      const code = attrOf(node, "chart") ?? children.map(plainText).join("\n");
+      return code ? [{ type: "mermaid", attrs: { code, caption: attrOf(node, "title") ?? null } }] : [];
+    }
     default:
       return flow(children);
   }

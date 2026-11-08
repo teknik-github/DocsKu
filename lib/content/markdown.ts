@@ -96,6 +96,13 @@ function block(node: JSONContent, indent: string): string {
       return wrap("Tab", attr("title", a.title), blocks(node.content));
     case "accordion":
       return wrap("Accordion", attr("title", a.title), blocks(node.content));
+    case "embed":
+      return `<Video${attr("src", a.url)}${attr("title", a.caption)} />`;
+    case "mermaid": {
+      const code = String(a.code ?? "");
+      const fence = code.includes("```") ? "````" : "```";
+      return `${fence}mermaid${a.caption ? ` title=${JSON.stringify(a.caption)}` : ""}\n${code}\n${fence}`;
+    }
     case "hero": {
       const buttons = (Array.isArray(a.buttons) ? a.buttons : [])
         .map((b: { title?: string; href?: string }) => `- [${b.title ?? ""}](${b.href ?? ""})`)

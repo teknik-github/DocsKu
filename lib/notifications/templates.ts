@@ -119,6 +119,17 @@ export function eventEmail(event: NotifyEvent, siteName: string, origin: string)
         lines: [`${event.by} menerbitkan ${quoteTitle(event.title)}.`],
         action: { label: "Lihat halaman", url: abs(event.href) },
       });
+    case "note.new":
+      return renderEmail({
+        siteName,
+        subject: `${prefix} ${event.reply ? "Balasan catatan" : "Catatan tim"} di ${quoteTitle(event.pageTitle)}`,
+        heading: event.reply ? "Ada balasan di catatan tim" : "Ada catatan tim baru",
+        lines: [
+          `${event.by} ${event.reply ? "membalas catatan" : "menulis catatan"} di ${quoteTitle(event.pageTitle)}${event.quote ? ` tentang “${event.quote.slice(0, 120)}”` : ""}:`,
+        ],
+        quote: event.excerpt,
+        action: { label: "Buka catatan", url: abs(`/admin/pages/${event.pageId}?catatan=${event.noteId}`) },
+      });
     case "search.misses":
       return null;
   }
@@ -145,6 +156,12 @@ export function eventSummary(event: NotifyEvent): { title: string; text: string;
       };
     case "feedback.new":
       return { title: `Pesan pembaca ${event.helpful ? "👍" : "👎"}: ${event.pageTitle}`, text: event.message, url: "/admin/stats" };
+    case "note.new":
+      return {
+        title: `${event.reply ? "Balasan catatan" : "Catatan tim"}: ${event.pageTitle}`,
+        text: `${event.by}: ${event.excerpt}`,
+        url: `/admin/pages/${event.pageId}?catatan=${event.noteId}`,
+      };
     case "search.misses":
       return {
         title: `Pencarian tanpa hasil (${event.day})`,

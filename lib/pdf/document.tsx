@@ -348,6 +348,23 @@ function block(node: JSONContent, ctx: Ctx, key: number): ReactNode {
         </View>
       );
     }
+    case "embed": {
+      // Videos can't play on paper: a link to the video with its caption.
+      const url = typeof a.url === "string" && /^https?:\/\//.test(a.url) ? a.url : null;
+      if (!url) return null;
+      const label = clean(String(a.caption || "Video"));
+      return (
+        <View key={key} style={[s.box, { marginBottom: 6 }]} wrap={false}>
+          <Text style={s.boxTitle}>{label}</Text>
+          <Link src={url} style={{ fontFamily: SANS, color: ctx.meta.accent, fontSize: 9 }}>
+            {url}
+          </Link>
+        </View>
+      );
+    }
+    case "mermaid":
+      // Diagrams are drawn by the browser; the PDF prints their source under the caption.
+      return codeBlock({ type: "codeBlock", attrs: { language: "mermaid" }, content: [{ type: "text", text: String(a.code ?? "") }] }, key, clean(String(a.caption || "Diagram (Mermaid)")));
     case "hero":
       return null;
     default:

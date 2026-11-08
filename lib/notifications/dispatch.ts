@@ -89,6 +89,10 @@ async function emailRecipients(event: NotifyEvent, people: Recipient[]): Promise
     case "page.published":
       byRole("page.published", ["admin", "editor", "contributor"]);
       return { key: "page.published", ids };
+    case "note.new":
+      // The page's owner and author, plus everyone already in the conversation.
+      personal("note.new", [...(await pagePeople(event.pageId)), ...event.participants]);
+      return { key: "note.new", ids };
     case "search.misses":
       return null;
   }

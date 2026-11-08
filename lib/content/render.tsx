@@ -7,6 +7,8 @@ import { Callout, type CalloutVariant } from "@/components/blocks/callout";
 import { Card, CardGroup } from "@/components/blocks/card";
 import { CodeBlock, CodeGroup, type CodeBlockProps } from "@/components/blocks/code";
 import { Hero } from "@/components/blocks/hero";
+import { Embed } from "@/components/blocks/embed";
+import { MermaidDiagram } from "@/components/blocks/mermaid";
 import { Step, Steps } from "@/components/blocks/steps";
 import { Tab, Tabs } from "@/components/blocks/tabs";
 import { headingIds, isExternalHref, parseLineSpec, safeHref, textOf } from "@/lib/content/doc";
@@ -157,6 +159,10 @@ function renderNode(node: JSONContent, ctx: Context, key: number): React.ReactNo
           {children()}
         </Accordion>
       );
+    case "embed":
+      return <Embed key={key} url={String(attrs.url ?? "")} caption={attrs.caption ?? null} />;
+    case "mermaid":
+      return <MermaidDiagram key={key} code={String(attrs.code ?? "")} caption={attrs.caption ?? null} />;
     case "hero":
       return (
         <Hero

@@ -1,12 +1,13 @@
 "use server";
 
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize, type SessionUser } from "@/lib/auth/dal";
 import { canEditPage } from "@/lib/auth/page-access";
 import { can } from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/activity";
+import { notify } from "@/lib/notify";
 
 /**
  * Internal notes on a page in the editor: never shown on the site. Anyone who
@@ -113,6 +114,29 @@ export async function addNote(pageId: string, input: { body: string; quote?: str
   // A reply reopens a resolved conversation: someone still has something to say.
   if (parentId) await db.update(schema.pageNotes).set({ resolvedAt: null, resolvedById: null }).where(eq(schema.pageNotes.id, parentId));
   if (!parentId) await logActivity({ user, action: "note.create", target: { type: "page", id: pageId, label: parsed.data.quote || parsed.data.body.slice(0, 80) } });
+
+  // Email/webhooks: the page's owner and author, and for a reply everyone already in the conversation.
+  const threadId = parentId ?? row.id;
+  const [thread] = await db.select({ quote: schema.pageNotes.quote }).from(schema.pageNotes).where(eq(schema.pageNotes.id, threadId));
+  const people = parentId
+    ? await db
+        .selectDistinct({ id: schema.pageNotes.authorId })
+        .from(schema.pageNotes)
+        .where(or(eq(schema.pageNotes.id, parentId), eq(schema.pageNotes.parentId, parentId)))
+    : [];
+  const [page] = await db.select({ title: schema.pages.draftTitle }).from(schema.pages).where(eq(schema.pages.id, pageId));
+  await notify({
+    type: "note.new",
+    actorId: user.id,
+    noteId: threadId,
+    pageId,
+    pageTitle: page?.title || "Tanpa judul",
+    by: user.name,
+    excerpt: parsed.data.body.slice(0, 300),
+    quote: thread?.quote ?? "",
+    reply: Boolean(parentId),
+    participants: people.flatMap((person) => (person.id ? [person.id] : [])),
+  });
   return { ok: true, id: row.id };
 }
 

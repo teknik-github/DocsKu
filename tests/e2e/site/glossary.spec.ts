@@ -9,6 +9,8 @@ test.describe("glossary", () => {
     await createPage(db, state, { slug: `glosarium-uji-${id}`, title: `Glosarium uji ${id}`, body: `Pakai ${term.toLowerCase()} untuk aplikasi. Lalu ${term} lagi.` });
 
     await page.goto("/admin/glossary");
+    // No AI configured in the test server: suggestions are offered but disabled.
+    await expect(page.getByRole("button", { name: "Usulkan dengan AI" })).toBeDisabled();
     await page.getByRole("button", { name: "Istilah baru" }).click();
     const form = page.getByTestId("glossary-form");
     await form.getByLabel("Istilah").fill(term);

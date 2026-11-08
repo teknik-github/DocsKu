@@ -1,6 +1,6 @@
 import "server-only";
 import { can } from "@/lib/auth/permissions";
-import { and, asc, count, desc, eq, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import type { PageStatus, Role } from "@/db/schema";
@@ -214,4 +214,25 @@ export async function getNavCounts(user?: { id: string; role: Role }) {
       (select count(*) from pages where kind = 'doc' and (status = 'draft' or has_changes))::int as drafts,
       (select count(*) from pages where kind = 'doc' and approval_status = 'pending')::int as approvals`);
   return { ...(row ?? { comments: 0, feedback: 0, drafts: 0, review: 0, approvals: 0 }), changes: 0 };
+}
+
+export type PageQuality = { score: number; issues: string[] };
+
+/**
+ * Writing-check score (0–100) of each page's working copy, the same checks as the
+ * editor's "Periksa" panel, with the warnings to show on hover. For /admin/pages.
+ */
+export async function pageQuality(ids: string[]): Promise<Map<string, PageQuality>> {
+  const result = new Map<string, PageQuality>();
+  if (!ids.length) return result;
+  const { checkQuality, jsonNode, qualityScore } = await import("@/components/admin/editor/quality");
+  const rows = await db
+    .select({ id: schema.pages.id, title: schema.pages.draftTitle, description: schema.pages.draftDescription, seo: schema.pages.draftSeo, content: schema.pages.draftContent })
+    .from(schema.pages)
+    .where(inArray(schema.pages.id, ids));
+  for (const row of rows) {
+    const report = checkQuality({ title: row.title, description: row.description, seoTitle: row.seo?.title, seoDescription: row.seo?.description, doc: jsonNode(row.content) });
+    result.set(row.id, { score: qualityScore(report), issues: report.issues.filter((issue) => issue.level !== "info").map((issue) => issue.message) });
+  }
+  return result;
 }

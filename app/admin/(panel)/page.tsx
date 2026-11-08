@@ -28,6 +28,7 @@ import { NewPageButton } from "@/components/admin/new-page-button";
 import { requireUser } from "@/lib/auth/dal";
 import { can } from "@/lib/auth/permissions";
 import { ContributorHome } from "@/components/admin/contributor-home";
+import { OpenNotes } from "@/components/admin/open-notes";
 import { getNavCounts, getPageStats, listPages, listScheduledPages, readSettingForAdmin } from "@/lib/data/admin";
 import { getAskStats, getSearchStats, getStatsOverview, getTopPages } from "@/lib/data/stats";
 import { getSiteSettings } from "@/lib/data/site";
@@ -189,6 +190,8 @@ async function Dashboard() {
           </Panel>
         )}
       </section>
+
+      <OpenNotes userId={user.id} className="mb-6" />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard

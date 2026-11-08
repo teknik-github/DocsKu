@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/auth/dal";
 import { getGlossary } from "@/lib/data/site";
 import { PageHeader, buttonClass } from "@/components/admin/ui";
 import { GlossaryManager } from "@/components/admin/glossary-manager";
+import { isAiReady } from "@/lib/ai/config";
 
 export const metadata = { title: "Glosarium" };
 
@@ -29,5 +30,6 @@ export default function GlossaryAdminPage() {
 
 async function Glossary() {
   await requirePermission("glossary.manage");
-  return <GlossaryManager initial={await getGlossary()} />;
+  const [glossary, ai] = await Promise.all([getGlossary(), isAiReady()]);
+  return <GlossaryManager initial={glossary} ai={ai} />;
 }
