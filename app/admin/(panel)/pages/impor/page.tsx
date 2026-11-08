@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { requireUser } from "@/lib/auth/dal";
+import { requirePermission } from "@/lib/auth/dal";
 import { readNavigation, sectionOptions } from "@/lib/automation";
 import { ImportWizard } from "@/components/admin/import-wizard";
 import { PageHeader } from "@/components/admin/ui";
@@ -27,7 +27,7 @@ export default function ImportPage() {
 }
 
 async function Wizard() {
-  const user = await requireUser();
+  const user = await requirePermission("pages.import");
   const navigation = await readNavigation();
   return (
     <ImportWizard

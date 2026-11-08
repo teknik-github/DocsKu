@@ -5,18 +5,25 @@ import { updateTag } from "next/cache";
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
-import { authorize } from "@/lib/auth/dal";
+import { authorize, type SessionUser } from "@/lib/auth/dal";
+import { can } from "@/lib/auth/permissions";
+import { canEditPage, editablePageIds, NO_PAGE_ACCESS } from "@/lib/auth/page-access";
 import { logActivity, pageLabel, pageLabels } from "@/lib/activity";
 import { EMPTY_DOC } from "@/lib/content/doc";
 import { PLACEHOLDER_SLUG, slugify, uniqueSlug } from "@/lib/slug";
 import { NO_NAV, readNavigation, resolveSection, writeNavigation } from "@/lib/automation";
 import { findCategory, placePages } from "@/lib/categories";
 import { forgetRedirects, recordSlugChange } from "@/lib/redirects";
+import { forgetRouteExistence } from "@/lib/route-exists";
 import { slugLanguageError } from "@/lib/translations";
 import { templateSeed } from "@/lib/templates";
+import { notify } from "@/lib/notify";
 import {
   NOT_FOUND,
   addRevision,
+  currentVersion,
+  nextDraftVersion,
+  type Conflict,
   createPageFromMarkdown,
   draftSchema,
   markdownPageSchema,
@@ -29,7 +36,15 @@ import {
 } from "@/lib/pages/service";
 import type { NavigationData, NavItemData } from "@/lib/site-types";
 
-export type SaveResult = { ok: true; savedAt: string; hasChanges: boolean } | { ok: false; error: string };
+export type SaveResult = { ok: true; savedAt: string; hasChanges: boolean; version?: number } | { ok: false; error: string; conflict?: Conflict };
+
+/** Signed in, and allowed to change this page's working copy (contributors: their own pages). */
+async function pageEditor(pageId: string): Promise<SessionUser | { error: string }> {
+  const user = await authorize("any");
+  if ("error" in user) return user;
+  if (!isId(pageId)) return { error: NOT_FOUND };
+  return (await canEditPage(user, pageId)) ? user : { error: NO_PAGE_ACCESS };
+}
 
 const isId = (id: unknown): id is string => z.uuid().safeParse(id).success;
 
@@ -37,6 +52,7 @@ const isId = (id: unknown): id is string => z.uuid().safeParse(id).success;
 function refreshPublicSite() {
   updateTag("pages");
   forgetRedirects();
+  forgetRouteExistence();
 }
 
 /**
@@ -48,7 +64,7 @@ function refreshPublicSite() {
  * columns stay empty until the first publish.
  */
 export async function createPage(formData?: FormData) {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) redirect("/admin/login");
   const wanted = formData?.get("category");
   const navigation = typeof wanted === "string" && wanted ? await readNavigation() : null;
@@ -70,7 +86,8 @@ export async function createPage(formData?: FormData) {
       updatedById: user.id,
     })
     .returning({ id: schema.pages.id });
-  if (navigation && category) await writeNavigation(placePages(navigation, [page.id], category));
+  // Contributors don't change the navigation: their page only waits for that category until it is published.
+  if (navigation && category && can(user, "pages.editAny")) await writeNavigation(placePages(navigation, [page.id], category));
   const meta = { ...(category ? { category } : {}), ...(seed ? { template: seed.name } : {}) };
   await logActivity({ user, action: "page.create", target: { type: "page", id: page.id, label: seed?.title || "Tanpa judul" }, meta: Object.keys(meta).length ? meta : undefined });
   redirect(`/admin/pages/${page.id}`);
@@ -80,24 +97,71 @@ export async function createPage(formData?: FormData) {
  * Saves the working copy. Visitors keep seeing the live version until the page
  * is (re)published. `revision` is true for manual saves (Ctrl+S).
  */
-export async function saveDraft(pageId: string, input: DraftInput, revision = false): Promise<SaveResult> {
-  const user = await authorize();
+export async function saveDraft(
+  pageId: string,
+  input: DraftInput,
+  revision = false,
+  /** The working-copy version the editor loaded (conflict check); `force` overwrites a newer save. */
+  options: { expectedVersion?: number; force?: boolean } = {},
+): Promise<SaveResult> {
+  const user = await pageEditor(pageId);
   if ("error" in user) return { ok: false, error: user.error };
-  if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const expectedVersion = Number.isInteger(options.expectedVersion) ? options.expectedVersion : undefined;
+  const result = await saveWorkingCopy(pageId, parsed.data, user.id, revision ? "save" : undefined, { expectedVersion, force: options.force === true });
+  if (result.ok && options.force) {
+    await logActivity({ user, action: "page.overwrite", target: { type: "page", id: pageId, label: parsed.data.title || (await pageLabel(pageId)) } });
+  }
+  return result;
+}
 
-  return saveWorkingCopy(pageId, parsed.data, user.id, revision ? "save" : undefined);
+/**
+ * "Muat versi terbaru" after a conflict: keeps the editor's copy as a revision
+ * (so nothing typed is lost), then returns the saved working copy and its version.
+ */
+export async function loadLatestDraft(pageId: string, local: DraftInput | null) {
+  const user = await pageEditor(pageId);
+  if ("error" in user) return { ok: false as const, error: user.error };
+  if (local) {
+    const parsed = draftSchema.safeParse(local);
+    if (parsed.success) await addRevision(pageId, parsed.data, "conflict-local", user.id);
+  }
+  const [page] = await db
+    .select({
+      title: schema.pages.draftTitle,
+      description: schema.pages.draftDescription,
+      content: schema.pages.draftContent,
+      seo: schema.pages.draftSeo,
+      cover: schema.pages.draftCoverImage,
+      version: schema.pages.draftVersion,
+      hasChanges: schema.pages.hasChanges,
+    })
+    .from(schema.pages)
+    .where(eq(schema.pages.id, pageId));
+  if (!page) return { ok: false as const, error: NOT_FOUND };
+  const { version, hasChanges, ...draft } = page;
+  return { ok: true as const, draft, version, hasChanges };
 }
 
 /** Publishes (or schedules) the editor's working copy. */
-export async function publishPage(pageId: string, input: DraftInput, publishAt: string | null): Promise<PublishResult> {
-  const user = await authorize();
+export async function publishPage(pageId: string, input: DraftInput, publishAt: string | null, expectedVersion?: number): Promise<PublishResult> {
+  const user = await authorize("pages.publish");
   if ("error" in user) return { ok: false, error: user.error };
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  const result = await publishWorkingCopy(pageId, parsed.data, publishAt, user.id, updateTag);
+  const [pending] = await db
+    .select({ approval: schema.pages.approvalStatus, requestedBy: schema.pages.approvalRequestedById })
+    .from(schema.pages)
+    .where(eq(schema.pages.id, pageId));
+  const result = await publishWorkingCopy(pageId, parsed.data, publishAt, user.id, updateTag, Number.isInteger(expectedVersion) ? expectedVersion : undefined);
+  if (result.ok && pending?.approval === "pending") {
+    // Publishing a submitted page is approving it.
+    await logActivity({ user, action: "page.approve", target: { type: "page", id: pageId, label: parsed.data.title } });
+    await notify({ type: "page.approved", pageId, title: parsed.data.title, href: `/docs/${result.slug}`, by: user.name, authorId: pending.requestedBy, actorId: user.id });
+  }
+  // "page.published" is sent by publishWorkingCopy itself.
   if (result.ok) {
     await logActivity({
       user,
@@ -111,9 +175,9 @@ export async function publishPage(pageId: string, input: DraftInput, publishAt: 
 
 /** Where the first publish puts the page in the navigation: a section id, "none", or null (automatic). */
 export async function setNavSection(pageId: string, value: string | null) {
-  const user = await authorize();
+  // Only where the page goes on its first publish; the navigation itself is not touched.
+  const user = await pageEditor(pageId);
   if ("error" in user) return { ok: false as const, error: user.error };
-  if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const navSection = value === null || value === NO_NAV ? value : await resolveSection(value);
   if (value && !navSection) return { ok: false as const, error: "Bagian navigasi tidak ditemukan." };
   // A translation takes its original's place in navigation and never gets its own.
@@ -123,7 +187,7 @@ export async function setNavSection(pageId: string, value: string | null) {
 
 /** Takes the page off the site (or cancels a schedule); content is kept. */
 export async function unpublishPage(pageId: string): Promise<SaveResult> {
-  const user = await authorize();
+  const user = await authorize("pages.publish");
   if ("error" in user) return { ok: false, error: user.error };
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const [before] = await db.select({ status: schema.pages.status }).from(schema.pages).where(eq(schema.pages.id, pageId));
@@ -140,9 +204,8 @@ export async function unpublishPage(pageId: string): Promise<SaveResult> {
 
 /** Discards unpublished edits by copying the live version back into the working copy. */
 export async function discardChanges(pageId: string) {
-  const user = await authorize();
+  const user = await pageEditor(pageId);
   if ("error" in user) return { ok: false as const, error: user.error };
-  if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const [page] = await db.select().from(schema.pages).where(eq(schema.pages.id, pageId));
   if (!page) return { ok: false as const, error: NOT_FOUND };
   await db
@@ -153,20 +216,21 @@ export async function discardChanges(pageId: string) {
       draftContent: page.content,
       draftSeo: page.seo,
       draftCoverImage: page.coverImage,
+      draftVersion: nextDraftVersion(),
       hasChanges: false,
       updatedById: user.id,
     })
     .where(eq(schema.pages.id, pageId));
   return {
     ok: true as const,
+    version: (await currentVersion(pageId))?.version,
     draft: { title: page.title, description: page.description, content: page.content, seo: page.seo, cover: page.coverImage },
   };
 }
 
 export async function updateSlug(pageId: string, value: string): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
-  const user = await authorize();
+  const user = await pageEditor(pageId);
   if ("error" in user) return { ok: false, error: user.error };
-  if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const parsed = slugSchema.safeParse(value);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   // Translations stay under their language; originals keep out of a language's prefix.
@@ -182,6 +246,8 @@ export async function updateSlug(pageId: string, value: string): Promise<{ ok: t
     .from(schema.pages)
     .where(and(eq(schema.pages.id, pageId), eq(schema.pages.kind, "doc")));
   if (!before) return { ok: false, error: "Halaman tidak ditemukan." };
+  // A public address (and its redirects) is the publisher's call.
+  if (before.publishedAt && !can(user, "pages.publish")) return { ok: false, error: "Slug halaman yang sudah pernah terbit hanya bisa diubah editor atau admin." };
   const [page] = await db
     .update(schema.pages)
     .set({ slug: parsed.data, updatedById: user.id })
@@ -199,9 +265,8 @@ export async function updateSlug(pageId: string, value: string): Promise<{ ok: t
 
 /** Suggests a slug from the title, for new pages. */
 export async function suggestSlug(pageId: string, title: string) {
-  const user = await authorize();
+  const user = await pageEditor(pageId);
   if ("error" in user) return null;
-  if (!isId(pageId)) return null;
   return uniqueSlug(slugify(title), pageId);
 }
 
@@ -233,9 +298,9 @@ async function removeFromNavigation(pageIds: string[]) {
 }
 
 export async function deletePage(pageId: string) {
-  const user = await authorize();
+  const user = await pageEditor(pageId);
   if ("error" in user) return { ok: false as const, error: user.error };
-  if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
+  if (!(await mayDelete(user, [pageId])).length) return { ok: false as const, error: "Kontributor hanya bisa menghapus draf miliknya yang belum pernah terbit." };
   // The home page can be unpublished but not deleted.
   const label = await pageLabel(pageId);
   const [deleted] = await db
@@ -251,10 +316,13 @@ export async function deletePage(pageId: string) {
 
 /** Bulk delete from the pages list. */
 export async function deletePages(pageIds: string[]) {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false as const, error: user.error };
-  const ids = z.array(z.uuid()).max(500).safeParse(pageIds);
-  if (!ids.success || !ids.data.length) return { ok: false as const, error: "Tidak ada halaman dipilih." };
+  const parsed = z.array(z.uuid()).max(500).safeParse(pageIds);
+  if (!parsed.success || !parsed.data.length) return { ok: false as const, error: "Tidak ada halaman dipilih." };
+  const allowed = await mayDelete(user, parsed.data);
+  if (allowed.length < parsed.data.length) return { ok: false as const, error: "Kontributor hanya bisa menghapus draf miliknya yang belum pernah terbit." };
+  const ids = { data: allowed };
   const labels = await pageLabels(ids.data);
   const deleted = await db
     .delete(schema.pages)
@@ -268,11 +336,23 @@ export async function deletePages(pageIds: string[]) {
   return { ok: true as const };
 }
 
+/** Pages the user may delete: staff any doc page; a contributor only their own pages that were never published. */
+async function mayDelete(user: SessionUser, ids: string[]): Promise<string[]> {
+  if (can(user, "pages.editAny")) return ids;
+  const own = await editablePageIds(user, ids);
+  if (!own.length) return [];
+  const rows = await db
+    .select({ id: schema.pages.id })
+    .from(schema.pages)
+    .where(and(inArray(schema.pages.id, own), eq(schema.pages.status, "draft"), isNull(schema.pages.publishedAt)));
+  return rows.map((row) => row.id);
+}
+
 /** Loads an older version into the working copy. Publish to make it live. */
 export async function restoreRevision(pageId: string, revisionId: string) {
-  const user = await authorize();
+  const user = await pageEditor(pageId);
   if ("error" in user) return { ok: false as const, error: user.error };
-  if (!isId(pageId) || !isId(revisionId)) return { ok: false as const, error: "Revisi tidak ditemukan." };
+  if (!isId(revisionId)) return { ok: false as const, error: "Revisi tidak ditemukan." };
   const [revision] = await db
     .select()
     .from(schema.pageRevisions)
@@ -303,13 +383,14 @@ export async function restoreRevision(pageId: string, revisionId: string) {
       draftContent: draft.content,
       draftSeo: draft.seo,
       draftCoverImage: draft.cover,
+      draftVersion: nextDraftVersion(),
       hasChanges: page.status !== "draft",
       updatedById: user.id,
     })
     .where(eq(schema.pages.id, pageId));
   await addRevision(pageId, draft, "restore", user.id);
   await logActivity({ user, action: "page.restore", target: { type: "page", id: pageId, label: draft.title || (await pageLabel(pageId)) }, meta: { revisionId, revisionAt: revision.createdAt.toISOString() } });
-  return { ok: true as const, draft };
+  return { ok: true as const, draft, version: (await currentVersion(pageId))?.version };
 }
 
 const aiDraftSchema = markdownPageSchema.extend({
@@ -325,11 +406,12 @@ const aiDraftSchema = markdownPageSchema.extend({
 export async function createDraftFromProposal(
   input: z.input<typeof aiDraftSchema>,
 ): Promise<{ ok: true; id: string; slug: string; status: "draft" | "published" | "scheduled"; publishedAt?: string } | { ok: false; error: string }> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   const parsed = aiDraftSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const { mode, publishAt } = parsed.data;
+  if (mode !== "draft" && !can(user, "pages.publish")) return { ok: false, error: "Kontributor hanya bisa membuat draf. Ajukan halamannya untuk ditinjau dari editor." };
   if (mode === "schedule") {
     const when = publishAt ? new Date(publishAt) : null;
     if (!when || Number.isNaN(when.getTime())) return { ok: false, error: "Tanggal jadwal tidak valid." };
@@ -353,7 +435,7 @@ export async function createDraftFromProposal(
 
 /** Marks a page as featured (shown first, labelled "Unggulan" in the Ghost layout). Applies right away. */
 export async function setFeatured(pageId: string, featured: boolean) {
-  const user = await authorize();
+  const user = await authorize("pages.publish");
   if ("error" in user) return { ok: false as const, error: user.error };
   if (!isId(pageId)) return { ok: false as const, error: NOT_FOUND };
   const [page] = await db

@@ -4,6 +4,7 @@ import { and, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Role } from "@/db/schema";
 import { TOKEN_PATTERN, isMcpScope, type McpScope } from "@/lib/mcp/scopes";
+import { can } from "@/lib/auth/permissions";
 
 const hash = (token: string) => createHash("sha256").update(token).digest("hex");
 
@@ -50,5 +51,7 @@ export async function verifyToken(token: string): Promise<TokenPrincipal | null>
         or(isNull(schema.apiTokens.lastUsedAt), lt(schema.apiTokens.lastUsedAt, sql`now() - interval '1 minute'`)),
       ),
     );
-  return { tokenId: row.tokenId, userId: row.userId, name: row.name, role: row.role, scopes: row.scopes.filter(isMcpScope) };
+  // A token never has more rights than its user: a contributor's token can't publish, whatever it was issued with.
+  const scopes = row.scopes.filter(isMcpScope).filter((scope) => scope !== "publish" || can(row.role, "pages.publish"));
+  return { tokenId: row.tokenId, userId: row.userId, name: row.name, role: row.role, scopes };
 }

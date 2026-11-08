@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isSameOrigin } from "@/lib/auth/request";
 import { readSessionUser } from "@/lib/auth/session";
+import { can } from "@/lib/auth/permissions";
 import { discardImport, runImport } from "@/lib/import";
 import { logActivity } from "@/lib/activity";
 
@@ -18,6 +19,7 @@ export async function POST(request: Request, { params }: RouteContext<"/admin/ap
   if (!isSameOrigin(request)) return Response.json({ error: "Permintaan dari situs lain ditolak." }, { status: 403 });
   const user = await readSessionUser();
   if (!user) return Response.json({ error: "Sesi Anda berakhir. Silakan masuk lagi." }, { status: 401 });
+  if (!can(user, "pages.import")) return Response.json({ error: "Kontributor tidak bisa mengimpor halaman." }, { status: 403 });
   const parsed = choicesSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Pilihan impor tidak valid." }, { status: 400 });
   const { id } = await params;
@@ -36,6 +38,7 @@ export async function DELETE(request: Request, { params }: RouteContext<"/admin/
   if (!isSameOrigin(request)) return Response.json({ error: "Permintaan dari situs lain ditolak." }, { status: 403 });
   const user = await readSessionUser();
   if (!user) return Response.json({ error: "Tidak diizinkan." }, { status: 401 });
+  if (!can(user, "pages.import")) return Response.json({ error: "Kontributor tidak bisa mengimpor halaman." }, { status: 403 });
   await discardImport((await params).id, user.id);
   return new Response(null, { status: 204 });
 }

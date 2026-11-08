@@ -52,6 +52,8 @@ echo "==> Uploads ($UPLOADS)"
 mkdir -p "$WORK/uploads"
 if [ -d "$UPLOADS" ]; then
   cp -a "$UPLOADS/." "$WORK/uploads/"
+  # Resized variants are rebuilt on demand by the media route.
+  rm -rf "$WORK/uploads/.cache"
 fi
 FILES=$(find "$WORK/uploads" -type f | wc -l | tr -d ' ')
 

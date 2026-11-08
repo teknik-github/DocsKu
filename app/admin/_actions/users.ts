@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { updateTag } from "next/cache";
+import { forgetRouteExistence } from "@/lib/route-exists";
 import { and, count, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
@@ -11,7 +12,7 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { createSession, destroyUserSessions } from "@/lib/auth/session";
 import { emailSchema, fieldErrors, keepValues, passwordSchema, type FormState } from "@/lib/validation";
 
-const role = z.enum(["admin", "editor"]);
+const role = z.enum(["admin", "editor", "contributor"]);
 const isId = (id: unknown): id is string => z.uuid().safeParse(id).success;
 
 async function emailTaken(email: string, exceptId?: string) {
@@ -54,7 +55,7 @@ async function adminCount() {
   return total;
 }
 
-export async function changeRole(userId: string, newRole: "admin" | "editor") {
+export async function changeRole(userId: string, newRole: "admin" | "editor" | "contributor") {
   const user = await authorize("admin");
   if ("error" in user) return { ok: false as const, error: user.error };
   if (!isId(userId) || !role.safeParse(newRole).success) return { ok: false as const, error: "Data tidak valid." };
@@ -101,6 +102,7 @@ export async function deleteUser(userId: string) {
   // Their articles fall back to the last editor as author; their /penulis page goes away.
   updateTag("pages");
   updateTag("authors");
+  forgetRouteExistence();
   await logActivity({ user, action: "user.delete", target: { type: "user", id: userId, label: target.name }, meta: { email: target.email, role: target.role } });
   return { ok: true as const };
 }
@@ -112,7 +114,7 @@ const passwordChangeSchema = z
   .refine((d) => d.password === d.confirm, { path: ["confirm"], message: "Password tidak sama." });
 
 export async function changeOwnPassword(_: FormState, formData: FormData): Promise<FormState> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) redirect("/admin/login");
   const parsed = passwordChangeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error) };

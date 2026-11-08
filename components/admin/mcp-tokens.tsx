@@ -83,7 +83,7 @@ function ConnectGuide({ endpoint, token }: { endpoint: string; token: string }) 
 }
 
 /** Personal API tokens for the /api/mcp endpoint, plus setup snippets. */
-export function McpTokens({ endpoint, tokens }: { endpoint: string; tokens: TokenRow[] }) {
+export function McpTokens({ endpoint, tokens, canPublish = true }: { endpoint: string; tokens: TokenRow[]; /** Contributors can't issue a publishing token. */ canPublish?: boolean }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState<McpScope[]>(["read"]);
@@ -167,7 +167,7 @@ export function McpTokens({ endpoint, tokens }: { endpoint: string; tokens: Toke
         </div>
         <fieldset className="space-y-2">
           <legend className="mb-1.5 text-sm font-medium">Izin</legend>
-          {MCP_SCOPES.map((scope) => (
+          {MCP_SCOPES.filter((scope) => canPublish || scope.id !== "publish").map((scope) => (
             <label key={scope.id} className="flex items-start gap-2 text-sm">
               <input
                 type="checkbox"

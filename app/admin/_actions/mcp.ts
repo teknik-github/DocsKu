@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { can } from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/activity";
 import { canEncrypt, encryptSecret } from "@/lib/crypto";
 import {
@@ -32,11 +33,12 @@ const tokenSchema = z.object({
 
 /** Creates a token; the value is returned once and cannot be shown again. */
 export async function createApiToken(input: z.input<typeof tokenSchema>): Promise<Result<{ token: string }>> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   const parsed = tokenSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const scopes = [...new Set(parsed.data.scopes.filter(isMcpScope))];
+  if (scopes.includes("publish") && !can(user, "pages.publish")) return { ok: false, error: "Kontributor tidak bisa membuat token dengan izin terbitkan." };
   const expiresAt = parsed.data.days ? new Date(Date.now() + parsed.data.days * 86_400_000) : null;
   const { id, token } = await issueToken(user.id, parsed.data.name, scopes, expiresAt);
   await logActivity({ user, action: "token.create", target: { type: "token", id, label: parsed.data.name }, meta: { scopes, days: parsed.data.days } });
@@ -45,7 +47,7 @@ export async function createApiToken(input: z.input<typeof tokenSchema>): Promis
 
 /** Revokes one of the user's own tokens (admins may revoke anyone's). */
 export async function revokeApiToken(id: string): Promise<Result> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (!z.uuid().safeParse(id).success) return { ok: false, error: "Token tidak ditemukan." };
   const where =

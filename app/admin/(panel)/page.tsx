@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import Link from "next/link";
 import {
+  Send,
   ArrowDownRight,
   ArrowUpRight,
   CalendarClock,
@@ -25,6 +26,8 @@ import {
 import { countBrokenLinks } from "@/lib/review";
 import { NewPageButton } from "@/components/admin/new-page-button";
 import { requireUser } from "@/lib/auth/dal";
+import { can } from "@/lib/auth/permissions";
+import { ContributorHome } from "@/components/admin/contributor-home";
 import { getNavCounts, getPageStats, listPages, listScheduledPages, readSettingForAdmin } from "@/lib/data/admin";
 import { getAskStats, getSearchStats, getStatsOverview, getTopPages } from "@/lib/data/stats";
 import { getSiteSettings } from "@/lib/data/site";
@@ -85,6 +88,12 @@ function StatCard({ icon: Icon, label, value, note, href, children }: { icon: Lu
 
 async function Dashboard() {
   const user = await requireUser();
+  if (!can(user, "pages.editAny")) {
+    await connection();
+    const now = new Date();
+    const today = new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: TIME_ZONE }).format(now);
+    return <ContributorHome user={user} greeting={greeting(now)} today={today} />;
+  }
   const admin = user.role === "admin";
   const [stats, pages, scheduled, overview, top, searches, asks, counts, site, aiReady, navigation, home, users] = await Promise.all([
     getPageStats(),
@@ -94,7 +103,7 @@ async function Dashboard() {
     getTopPages(7, 5),
     getSearchStats(7),
     getAskStats(7),
-    getNavCounts(),
+    getNavCounts(user),
     getSiteSettings(),
     isAiReady(),
     readNavigation(),
@@ -112,6 +121,7 @@ async function Dashboard() {
   const brokenLinks = await countBrokenLinks();
 
   const attention: { icon: LucideIcon; text: string; href: string; tone: "accent" | "plain" }[] = [
+    counts.approvals && { icon: Send, text: `${counts.approvals} halaman menunggu persetujuan Anda`, href: "/admin/pages?persetujuan=1", tone: "accent" as const },
     counts.comments && { icon: MessageSquare, text: `${counts.comments} komentar menunggu persetujuan`, href: "/admin/comments?view=pending", tone: "accent" as const },
     counts.feedback && { icon: MessageSquareText, text: `${counts.feedback} pesan pembaca belum ditangani`, href: "/admin/stats", tone: "accent" as const },
     unpublishedChanges && { icon: FilePen, text: `${unpublishedChanges} halaman terbit punya perubahan yang belum diterbitkan`, href: "/admin/pages?status=published", tone: "plain" as const },

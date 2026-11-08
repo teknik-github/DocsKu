@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, KeyRound, PenLine, Search, ShieldCheck, ShieldOff, Shuffle, Trash2, UserPlus, X } from "lucide-react";
+import { Check, Copy, KeyRound, PenLine, Search, Send, ShieldCheck, ShieldOff, Shuffle, Trash2, UserPlus, X } from "lucide-react";
 import { changeRole, createUser, deleteUser, resetPassword } from "@/app/admin/_actions/users";
 import { resetUserTwoFactor } from "@/app/admin/_actions/two-factor";
 import { formatDateTime } from "@/components/admin/format";
@@ -15,7 +15,7 @@ export type UserRow = {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "editor";
+  role: "admin" | "editor" | "contributor";
   createdAt: string;
   /** Docs pages this user created. */
   pages: number;
@@ -37,7 +37,12 @@ const ROLES = {
   editor: {
     label: "Editor",
     icon: PenLine,
-    text: "Menulis, menyunting, menerbitkan, dan menjadwalkan halaman; mengunggah media; memakai AI; mengelola komentar.",
+    text: "Menulis, menyunting, menerbitkan, dan menjadwalkan semua halaman; menyetujui pengajuan; mengunggah media; memakai AI; mengelola komentar.",
+  },
+  contributor: {
+    label: "Kontributor",
+    icon: Send,
+    text: "Menulis dan menyunting halamannya sendiri, lalu mengajukannya untuk ditinjau. Tidak bisa menerbitkan atau mengubah pengaturan.",
   },
 } as const;
 
@@ -62,7 +67,8 @@ export function UsersView({ users, currentUserId }: { users: UserRow[]; currentU
   const stats = [
     { label: "Pengguna", value: users.length },
     { label: "Admin", value: admins },
-    { label: "Editor", value: users.length - admins },
+    { label: "Editor", value: users.filter((u) => u.role === "editor").length },
+    { label: "Kontributor", value: users.filter((u) => u.role === "contributor").length },
     { label: "Sedang masuk", value: users.filter((u) => u.active).length },
     { label: "Pakai 2FA", value: users.filter((u) => u.twoFactor).length },
   ];
@@ -84,7 +90,7 @@ export function UsersView({ users, currentUserId }: { users: UserRow[]; currentU
         </Button>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-3">
         {(Object.keys(ROLES) as (keyof typeof ROLES)[]).map((key) => {
           const role = ROLES[key];
           return (
@@ -224,10 +230,11 @@ export function UsersView({ users, currentUserId }: { users: UserRow[]; currentU
                     title={self ? "Peran akun sendiri tidak bisa diubah" : lastAdmin ? "Harus ada minimal satu admin" : undefined}
                     aria-label={`Peran ${user.name}`}
                     onChange={(e) => act(() => changeRole(user.id, e.target.value as UserRow["role"]), `Peran ${user.name} diperbarui.`)}
-                    className="h-8 w-28! text-xs"
+                    className="h-8 w-32! text-xs"
                   >
                     <option value="admin">Admin</option>
                     <option value="editor">Editor</option>
+                    <option value="contributor">Kontributor</option>
                   </Select>
                   <span className="text-xs text-fg-muted md:hidden">
                     {user.pages} halaman · {user.lastLogin ? `masuk ${formatDateTime(user.lastLogin)}` : "belum pernah masuk"}
@@ -320,7 +327,7 @@ function NewUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
         </Field>
         <div>
           <span className="mb-1.5 block text-sm font-medium text-fg">Peran</span>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             {(Object.keys(ROLES) as (keyof typeof ROLES)[]).map((key) => (
               <label key={key} className="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm has-checked:border-accent has-checked:bg-accent-soft/40">
                 <input type="radio" name="role" value={key} defaultChecked={(values.role ?? "editor") === key} className="accent-accent" />

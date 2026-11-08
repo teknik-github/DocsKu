@@ -25,6 +25,11 @@ import { COLOR_THEMES, colorThemeOf } from "@/lib/color-themes";
 import { SecuritySettingsForm } from "@/components/admin/security-settings-form";
 import { getSecuritySettings } from "@/lib/data/security";
 import { db } from "@/db";
+import { EmailSettingsForm } from "@/components/admin/email-settings-form";
+import { WebhooksPanel } from "@/components/admin/webhooks-panel";
+import { emailReady, emailView, readEmailSettings } from "@/lib/notifications/settings";
+import { loadWebhooks, outboxStats } from "@/lib/notifications/admin";
+import { canEncrypt } from "@/lib/crypto";
 import { sql } from "drizzle-orm";
 
 export const metadata = { title: "Pengaturan" };
@@ -90,6 +95,7 @@ async function Settings() {
     readLanguages(),
     db.execute<{ locale: string; n: number }>(sql`select locale, count(*)::int as n from pages where translation_of is not null group by locale`),
   ]);
+  const [email, outbox, webhookData] = await Promise.all([readEmailSettings(), outboxStats(), loadWebhooks()]);
   const automationOn = (["navigation", "slug", "description", "seo", "cover"] as const).filter((key) => automation[key]).length;
 
   const sections: SettingsSection[] = [
@@ -128,6 +134,16 @@ async function Settings() {
       status: security.requireAdmin2fa
         ? { text: "2FA wajib untuk admin", tone: "on" }
         : { text: `${adminsTwoFactor.withTwoFactor}/${adminsTwoFactor.total} admin 2FA`, tone: adminsTwoFactor.withTwoFactor < adminsTwoFactor.total ? "warn" : "on" },
+    },
+    {
+      id: "email",
+      label: "Email",
+      status: emailReady(email) ? { text: outbox.failed ? `Aktif · ${outbox.failed} gagal` : "Aktif", tone: outbox.failed ? "warn" : "on" } : { text: email.host ? "Mati" : "Belum diatur", tone: "off" },
+    },
+    {
+      id: "webhook",
+      label: "Webhook",
+      status: webhookData.hooks.some((h) => h.enabled) ? { text: `${webhookData.hooks.filter((h) => h.enabled).length} aktif`, tone: "on" } : { text: "Belum ada", tone: "off" },
     },
     {
       id: "widget",
@@ -169,6 +185,12 @@ async function Settings() {
         </Section>
         <Section id="keamanan">
           <SecuritySettingsForm initial={security} admins={{ total: adminsTwoFactor.total, withTwoFactor: adminsTwoFactor.withTwoFactor }} ownEnabled={adminsTwoFactor.ownEnabled} />
+        </Section>
+        <Section id="email">
+          <EmailSettingsForm initial={emailView(email)} stats={outbox} siteUrlSet={Boolean(process.env.SITE_URL)} canEncrypt={canEncrypt()} />
+        </Section>
+        <Section id="webhook">
+          <WebhooksPanel hooks={webhookData.hooks} deliveries={webhookData.deliveries} canEncrypt={canEncrypt()} />
         </Section>
         <Section id="widget">
           <WidgetSettingsForm initial={widget} siteUrl={process.env.SITE_URL?.replace(/\/+$/, "") || null} themeAccent={themeAccent} askAiAvailable={askAiAvailable} />

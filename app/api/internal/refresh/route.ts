@@ -1,6 +1,8 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { authorizedInternal } from "@/lib/internal-auth";
 import { forgetRedirects } from "@/lib/redirects";
+import { forgetRouteExistence } from "@/lib/route-exists";
+import { forgetWidgetFrame } from "@/lib/widget-frame";
 
 /**
  * Marks every page and cached read as stale. instrumentation.ts calls it once
@@ -13,5 +15,7 @@ export async function POST(request: Request) {
   revalidatePath("/", "layout");
   for (const tag of ["pages", "navigation", "settings"]) revalidateTag(tag, { expire: 0 });
   forgetRedirects();
+  forgetRouteExistence();
+  forgetWidgetFrame();
   return Response.json({ ok: true });
 }

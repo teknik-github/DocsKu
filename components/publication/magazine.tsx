@@ -95,7 +95,7 @@ export function MagazineHub({
           <div className="min-w-0">
             <Link href={lead.card.href} prefetch={true} className="group block">
               <div className="aspect-[16/9] overflow-hidden bg-fill">
-                <CoverArt src={lead.card.cover} title={lead.card.title} className="transition-transform duration-500 group-hover:scale-[1.02]" />
+                <CoverArt src={lead.card.cover} title={lead.card.title} sizes="(min-width: 1024px) 60vw, 100vw" priority className="transition-transform duration-500 group-hover:scale-[1.02]" />
               </div>
               <div className="mt-5">
                 <Kicker>{lead.section}</Kicker>
@@ -209,7 +209,7 @@ export function MagazineArticle({
         </header>
         {cover && (
           <figure className="mt-10 aspect-[2.2/1] overflow-hidden bg-fill">
-            <CoverArt src={cover} title={article.title} />
+            <CoverArt src={cover} title={article.title} sizes="100vw" priority />
           </figure>
         )}
 

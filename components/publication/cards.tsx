@@ -2,13 +2,28 @@ import Link from "next/link";
 import { Star } from "lucide-react";
 import { stableHash } from "@/lib/cover-palette";
 import type { PageCard } from "@/lib/site-types";
+import { responsiveImage } from "@/lib/responsive-image";
 import { LocalDate, T } from "@/components/locale-text";
 
 /** The page's cover image, or a generated one (tinted pattern with the title's initial). */
-export function CoverArt({ src, title, className = "" }: { src: string | null; title: string; className?: string }) {
+export function CoverArt({
+  src,
+  title,
+  className = "",
+  sizes = "(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw",
+  priority = false,
+}: {
+  src: string | null;
+  title: string;
+  className?: string;
+  /** How wide the box is on screen, for picking a variant (lib/responsive-image.ts). */
+  sizes?: string;
+  /** Above the fold (an article's own cover): load at once instead of lazily. */
+  priority?: boolean;
+}) {
   if (src) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={src} alt="" loading="lazy" className={`h-full w-full object-cover ${className}`} />;
+    return <img {...responsiveImage(src, { sizes })} alt="" loading={priority ? "eager" : "lazy"} decoding="async" className={`h-full w-full object-cover ${className}`} />;
   }
   const h = stableHash(title);
   const angle = h % 360;

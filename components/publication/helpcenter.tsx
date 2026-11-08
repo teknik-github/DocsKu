@@ -10,6 +10,7 @@ import { type ArticleData, InlineToc, markdownOf, SideToc } from "@/components/p
 import { Breadcrumb, CategoryBadge, categoriesOf, popularFirst } from "@/components/publication/parts";
 import { LocalDate, T } from "@/components/locale-text";
 import { AuthorByline } from "@/components/author";
+import { CategoryPdfLink } from "@/components/pdf-button";
 
 /** "Pusat bantuan": a help centre (Helpjuice/Zendesk style). */
 
@@ -106,6 +107,9 @@ export function HelpCenterHub({
                         </ul>
                       </details>
                     )}
+                    <div className="mt-auto px-2 pt-4">
+                      <CategoryPdfLink sectionId={section.id} />
+                    </div>
                   </article>
                 ))}
               </div>
@@ -222,6 +226,9 @@ export function HelpCenterArticle({
                   <ArticleRow key={page.href} href={page.href} title={page.title} active={page.href === article.href} />
                 ))}
               </ul>
+              <div className="mt-4 px-2">
+                <CategoryPdfLink sectionId={place.section.id} />
+              </div>
             </div>
           )}
         </aside>

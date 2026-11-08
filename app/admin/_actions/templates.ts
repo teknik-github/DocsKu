@@ -17,7 +17,7 @@ type Result = { ok: true } | { ok: false; error: string };
 
 /** For the "Halaman baru" picker: built-in templates first, then the team's. */
 export async function getTemplateChoices(): Promise<{ ok: true; templates: TemplateChoice[]; userId: string; admin: boolean } | { ok: false; error: string }> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   return { ok: true, templates: await listTemplateChoices(), userId: user.id, admin: user.role === "admin" };
 }

@@ -2,9 +2,10 @@ import { Suspense } from "react";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
-import { ArrowUpRight, ChevronRight, KeyRound, Mail, Plug, ShieldCheck, UserRound } from "lucide-react";
+import { ArrowUpRight, Bell, ChevronRight, KeyRound, Mail, Plug, ShieldCheck, UserRound } from "lucide-react";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth/dal";
+import { ROLE_LABELS } from "@/lib/auth/permissions";
 import { authorHref } from "@/lib/authors";
 import { AvatarEditor, EmailForm, PasswordForm, PublicProfileForm } from "@/components/admin/profile-forms";
 import { Alert, PageHeader, Panel } from "@/components/admin/ui";
@@ -14,6 +15,8 @@ import { canEncrypt } from "@/lib/crypto";
 import { getSiteSettings } from "@/lib/data/site";
 import { getSecuritySettings } from "@/lib/data/security";
 import { getAuthorPage } from "@/lib/data/authors";
+import { NotificationPrefs } from "@/components/admin/notification-prefs";
+import { emailReady, readEmailSettings } from "@/lib/notifications/settings";
 
 export const metadata = { title: "Profil" };
 
@@ -21,6 +24,7 @@ const SECTIONS = [
   { id: "publik", label: "Profil publik", icon: UserRound },
   { id: "akun", label: "Akun", icon: Mail },
   { id: "keamanan", label: "Keamanan", icon: KeyRound },
+  { id: "notifikasi", label: "Notifikasi", icon: Bell },
   { id: "integrasi", label: "Integrasi", icon: Plug },
 ];
 
@@ -43,7 +47,7 @@ async function Profile({ searchParams }: Pick<PageProps<"/admin/profile">, "sear
     getSecuritySettings(),
     searchParams,
     db
-      .select({ username: schema.users.username, avatar: schema.users.avatar, jobTitle: schema.users.jobTitle, bio: schema.users.bio, links: schema.users.links, createdAt: schema.users.createdAt })
+      .select({ username: schema.users.username, avatar: schema.users.avatar, jobTitle: schema.users.jobTitle, bio: schema.users.bio, links: schema.users.links, createdAt: schema.users.createdAt, notificationPrefs: schema.users.notificationPrefs })
       .from(schema.users)
       .where(eq(schema.users.id, user.id)),
     headers(),
@@ -88,7 +92,7 @@ async function Profile({ searchParams }: Pick<PageProps<"/admin/profile">, "sear
               <p className="truncate text-xl font-semibold text-fg">{user.name}</p>
               {profile?.jobTitle && <p className="truncate text-sm text-accent">{profile.jobTitle}</p>}
               <div className="mt-2 flex flex-wrap items-center justify-center gap-2 text-xs sm:justify-start">
-                <span className="rounded-full bg-fill px-2 py-0.5 font-medium text-fg-muted">{user.role === "admin" ? "Admin" : "Editor"}</span>
+                <span className="rounded-full bg-fill px-2 py-0.5 font-medium text-fg-muted">{ROLE_LABELS[user.role]}</span>
                 {status.enabled && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                     <ShieldCheck className="size-3" />
@@ -146,6 +150,10 @@ async function Profile({ searchParams }: Pick<PageProps<"/admin/profile">, "sear
               <TwoFactorPanel status={status} available={canEncrypt()} siteName={site.name} />
             </div>
           </div>
+        </Section>
+
+        <Section id="notifikasi" title="Notifikasi email" description="Email yang Anda terima dari situs ini. Anda tidak pernah diberi tahu tentang tindakan Anda sendiri.">
+          <NotificationPrefs role={user.role} initial={profile?.notificationPrefs ?? {}} emailEnabled={emailReady(await readEmailSettings())} isAdmin={user.role === "admin"} />
         </Section>
 
         <section id="integrasi" className="scroll-mt-24">

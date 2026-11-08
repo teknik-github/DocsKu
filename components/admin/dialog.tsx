@@ -24,6 +24,8 @@ type PromptOptions = Options & {
   type?: "text" | "password";
   placeholder?: string;
   minLength?: number;
+  /** Allow confirming with an empty value (resolves to ""). */
+  optional?: boolean;
 };
 type Request = { id: number } & (
   | ({ kind: "confirm"; resolve: (ok: boolean) => void } & Options)
@@ -168,7 +170,7 @@ function DialogView({ request, onClose }: { request: Request; onClose: (result: 
           <button
             ref={confirmRef}
             type="submit"
-            disabled={request.kind === "prompt" && !value}
+            disabled={request.kind === "prompt" && !value && !request.optional}
             className={
               danger
                 ? "inline-flex h-8 items-center justify-center rounded-lg bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"

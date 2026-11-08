@@ -11,6 +11,8 @@ import { mdxToDoc } from "@/lib/content/mdx-to-doc";
 import { toMarkdown } from "@/lib/content/markdown";
 import type { McpScope } from "@/lib/mcp/scopes";
 import type { TokenPrincipal } from "@/lib/mcp/tokens";
+import { canEditPage, NO_PAGE_ACCESS } from "@/lib/auth/page-access";
+import { can as allowed } from "@/lib/auth/permissions";
 import {
   createPageFromMarkdown,
   draftSchema,
@@ -56,7 +58,8 @@ async function readNavigation(): Promise<NavigationData> {
 }
 
 export function createDocskuServer({ principal, baseUrl, invalidate }: { principal: TokenPrincipal; baseUrl: string; invalidate: Invalidate }) {
-  const can = (scope: McpScope) => principal.scopes.includes(scope);
+  // Scopes narrow what the user may do, never widen it (verifyToken drops "publish" for contributors too).
+  const can = (scope: McpScope) => principal.scopes.includes(scope) && (scope !== "publish" || allowed(principal.role, "pages.publish"));
   /** Activity log entry for a write through this token. */
   const log = (action: string, page: { id: string; label: string | null }, meta?: Record<string, unknown>) =>
     logActivity({ user: { id: principal.userId, name: principal.name }, action, target: { type: "page", id: page.id, label: page.label }, meta: { via: "mcp", ...meta } });
@@ -251,6 +254,7 @@ ${COMPONENTS}`,
       async ({ page: ref, title, description, content, content_mode, seo }) => {
         const page = await findPage(ref);
         if (!page) return fail(`Halaman "${ref}" tidak ditemukan.`);
+        if (!(await canEditPage({ id: principal.userId, role: principal.role }, page.id))) return fail(NO_PAGE_ACCESS);
         let doc: JSONContent = page.draftContent;
         if (content !== undefined) {
           const added = mdxToDoc(content);

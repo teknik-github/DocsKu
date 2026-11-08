@@ -1,10 +1,12 @@
 "use server";
 
 import { updateTag } from "next/cache";
+import { forgetRouteExistence } from "@/lib/route-exists";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { canEditPage, NO_PAGE_ACCESS } from "@/lib/auth/page-access";
 import { logActivity, pageLabel } from "@/lib/activity";
 import { LANGUAGE_CODE, RESERVED_CODES, type LanguageSettings } from "@/lib/i18n";
 import { type TranslationRow, createTranslation, readLanguages, translateWithAi, translationInfo } from "@/lib/translations";
@@ -16,9 +18,10 @@ const isId = (value: unknown) => z.uuid().safeParse(value).success;
 
 /** "Buat terjemahan": a draft copy of the original in `locale` (or the existing one). Editors and admins. */
 export async function createPageTranslation(originalId: string, locale: string): Promise<Result<{ id: string }>> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (!isId(originalId)) return { ok: false, error: "Halaman tidak ditemukan." };
+  if (!(await canEditPage(user, originalId))) return { ok: false, error: NO_PAGE_ACCESS };
   const created = await createTranslation(originalId, locale, user.id);
   if ("error" in created) return { ok: false, error: created.error };
   await logActivity({ user, action: "page.translate", target: { type: "page", id: created.id, label: await pageLabel(created.id) }, meta: { locale, from: originalId, mode: "copy" } });
@@ -30,11 +33,14 @@ export async function createPageTranslation(originalId: string, locale: string):
  * working copy with an AI translation of the original. Never publishes.
  */
 export async function translatePageWithAi(originalId: string, locale: string): Promise<Result<{ id: string }>> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (!isId(originalId)) return { ok: false, error: "Halaman tidak ditemukan." };
+  if (!(await canEditPage(user, originalId))) return { ok: false, error: NO_PAGE_ACCESS };
   const created = await createTranslation(originalId, locale, user.id);
   if ("error" in created) return { ok: false, error: created.error };
+  // An existing translation someone else wrote is theirs to overwrite.
+  if (!(await canEditPage(user, created.id))) return { ok: false, error: NO_PAGE_ACCESS };
   const result = await translateWithAi(created.id, user.id);
   if (!result.ok) return result;
   await logActivity({
@@ -100,6 +106,7 @@ export async function saveLanguageSettings(input: LanguageSettings): Promise<Res
   updateTag("settings");
   updateTag("pages");
   updateTag("navigation");
+  forgetRouteExistence();
   await logActivity({ user, action: "settings.save", target: { type: "settings", id: "bahasa", label: "Bahasa" }, meta: { section: "languages", languages: codes } });
   return { ok: true };
 }
@@ -116,7 +123,7 @@ export type PageTranslations = {
 
 /** The editor's "Terjemahan" block: the page's language, its original, and every language's translation. */
 export async function getPageTranslations(pageId: string): Promise<PageTranslations | null> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user || !isId(pageId)) return null;
   const [info, languages, ai] = await Promise.all([translationInfo(pageId), readLanguages(), isAiReady()]);
   if (!info) return null;

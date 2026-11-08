@@ -10,6 +10,11 @@ import { Hero } from "@/components/blocks/hero";
 import { Step, Steps } from "@/components/blocks/steps";
 import { Tab, Tabs } from "@/components/blocks/tabs";
 import { headingIds, isExternalHref, parseLineSpec, safeHref, textOf } from "@/lib/content/doc";
+import { mediaDimensions } from "@/lib/media-dimensions";
+import { responsiveImage } from "@/lib/responsive-image";
+
+/** Body images fill the text column (at most ~48rem). */
+const BODY_IMAGE_SIZES = "(min-width: 52rem) 48rem, 100vw";
 
 type Context = { nextHeadingId: () => string };
 
@@ -80,8 +85,11 @@ function renderNode(node: JSONContent, ctx: Context, key: number): React.ReactNo
     case "image": {
       const src = safeHref(attrs.src);
       if (!src) return null;
+      // Uploads get resized WebP variants and their real size (no layout shift); other images stay as they are.
+      const size = mediaDimensions(src);
+      const image = responsiveImage(src, { sizes: BODY_IMAGE_SIZES, intrinsicWidth: size?.width });
       // eslint-disable-next-line @next/next/no-img-element
-      return <img key={key} src={src} alt={attrs.alt ?? ""} title={attrs.title ?? undefined} loading="lazy" />;
+      return <img key={key} {...image} width={size?.width} height={size?.height} alt={attrs.alt ?? ""} title={attrs.title ?? undefined} loading="lazy" decoding="async" />;
     }
     case "table":
       return (

@@ -133,7 +133,7 @@ export function HybridArticle({
             </header>
             {article.cover && (
               <div className="mb-10 aspect-[2/1] overflow-hidden rounded-2xl border border-line">
-                <CoverArt src={article.cover} title={article.title} />
+                <CoverArt src={article.cover} title={article.title} sizes="(min-width: 48rem) 44rem, 100vw" priority />
               </div>
             )}
             <InlineToc doc={article.doc} className="xl:hidden" />
@@ -233,7 +233,7 @@ export function GhostArticle({
         </header>
         <div className="mx-auto mt-12 max-w-5xl px-5 sm:px-8">
           <div className="aspect-[2.2/1] overflow-hidden rounded-2xl border border-line">
-            <CoverArt src={article.cover ?? article.autoCover ?? null} title={article.title} />
+            <CoverArt src={article.cover ?? article.autoCover ?? null} title={article.title} sizes="(min-width: 64rem) 60rem, 100vw" priority />
           </div>
         </div>
         <div className="mx-auto mt-14 max-w-6xl px-5 sm:px-8 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,44rem)_minmax(0,1fr)] xl:gap-10">

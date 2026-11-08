@@ -80,7 +80,7 @@ export const ACTIVITY_KINDS = {
   masuk: { label: "Masuk & keamanan", prefixes: ["auth."] },
   pengaturan: { label: "Pengaturan & tema", prefixes: ["settings.", "theme."] },
   redirect: { label: "Redirect", prefixes: ["redirect."] },
-  integrasi: { label: "Token & MCP", prefixes: ["token.", "mcp."] },
+  integrasi: { label: "Token, MCP & webhook", prefixes: ["token.", "mcp.", "webhook."] },
 } as const;
 export type ActivityKind = keyof typeof ACTIVITY_KINDS;
 export const ACTIVITY_PER_PAGE = 50;

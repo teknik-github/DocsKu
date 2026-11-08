@@ -1,6 +1,7 @@
 "use server";
 
 import { updateTag } from "next/cache";
+import { forgetRouteExistence } from "@/lib/route-exists";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
@@ -28,7 +29,7 @@ async function usernameTaken(username: string, exceptId: string) {
 
 /** Live check for the username field: format, reserved words, and whether someone else has it. */
 export async function checkUsername(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   const username = String(value ?? "").trim();
   const error = usernameError(username);
@@ -63,7 +64,7 @@ const publicProfileSchema = z.object({
 
 /** "Profil publik": what readers see under articles and on /penulis/<username>. */
 export async function updatePublicProfile(_: FormState, formData: FormData): Promise<FormState> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { error: user.error };
   const values = keepValues(formData, ["name", "username", "jobTitle", "bio", "links"]);
   let links: unknown = [];
@@ -90,6 +91,7 @@ export async function updatePublicProfile(_: FormState, formData: FormData): Pro
   const next = { name: data.name, username: data.username || null, jobTitle: data.jobTitle || null, bio: data.bio || null, links: data.links };
   await db.update(schema.users).set(next).where(eq(schema.users.id, user.id));
   updateTag("authors");
+  forgetRouteExistence();
 
   const changed = before ? (Object.keys(next) as (keyof typeof next)[]).filter((key) => JSON.stringify(before[key]) !== JSON.stringify(next[key])) : [];
   if (changed.length) {
@@ -105,7 +107,7 @@ export async function updatePublicProfile(_: FormState, formData: FormData): Pro
 
 /** The photo: an upload from the media library (/media/…) or null to remove it. */
 export async function setAvatar(url: string | null): Promise<Result> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (url !== null) {
     if (typeof url !== "string" || !isAvatarUrl(url)) return { ok: false, error: "Foto tidak valid." };
@@ -119,6 +121,7 @@ export async function setAvatar(url: string | null): Promise<Result> {
   }
   await db.update(schema.users).set({ avatar: url }).where(eq(schema.users.id, user.id));
   updateTag("authors");
+  forgetRouteExistence();
   await logActivity({ user, action: "user.profile", target: { type: "user", id: user.id, label: user.name }, meta: { fields: ["avatar"], ...(url ? {} : { removed: true }) } });
   return { ok: true };
 }
@@ -127,7 +130,7 @@ const emailFormSchema = z.object({ email: emailSchema });
 
 /** "Akun": the sign-in email (never shown publicly). */
 export async function updateEmail(_: FormState, formData: FormData): Promise<FormState> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { error: user.error };
   const values = keepValues(formData, ["email"]);
   const parsed = emailFormSchema.safeParse(Object.fromEntries(formData));
@@ -148,7 +151,7 @@ export type TeamAuthor = { id: string; name: string; avatar: string | null; jobT
 
 /** The editor's "Penulis" picker: the page's author (creator, or last editor for older pages) and the team. */
 export async function getPageAuthor(pageId: string): Promise<{ authorId: string | null; team: TeamAuthor[] } | null> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user || !z.uuid().safeParse(pageId).success) return null;
   const [[page], team] = await Promise.all([
     db
@@ -174,6 +177,7 @@ export async function setPageAuthor(pageId: string, authorId: string): Promise<R
   if (!updated.length) return { ok: false, error: "Halaman tidak ditemukan." };
   updateTag("pages");
   updateTag("authors");
+  forgetRouteExistence();
   await logActivity({ user, action: "page.author", target: { type: "page", id: pageId, label: await pageLabel(pageId) }, meta: { author: author.name } });
   return { ok: true };
 }

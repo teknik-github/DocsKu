@@ -27,7 +27,7 @@ const allowAttempt = (userId: string) => allow(`2fa:${userId}`, 10, 15 * 60 * 10
  * browser sends back with the first code. Nothing is stored until then.
  */
 export async function startTwoFactor(): Promise<{ ok: true; secret: string; svg: string; sealed: string } | Fail> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (!canEncrypt()) return { ok: false, error: "ENCRYPTION_KEY belum diatur di server, jadi 2FA belum bisa diaktifkan." };
   const [row] = await db.select({ enabledAt: schema.users.totpEnabledAt }).from(schema.users).where(eq(schema.users.id, user.id));
@@ -42,7 +42,7 @@ export async function startTwoFactor(): Promise<{ ok: true; secret: string; svg:
 
 /** Step 2: the first code proves the app is set up; 2FA is saved and the recovery codes are returned once. */
 export async function confirmTwoFactor(sealed: string, code: string): Promise<{ ok: true; codes: string[] } | Fail> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (!allowAttempt(user.id)) return tooMany;
   let setup: { u: string; s: string; t: number } | null = null;
@@ -80,7 +80,7 @@ async function proveIdentity(userId: string, proof: string) {
 }
 
 export async function disableTwoFactor(proof: string): Promise<{ ok: true } | Fail> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (!allowAttempt(user.id)) return tooMany;
   if (!(await proveIdentity(user.id, proof))) return { ok: false, error: "Password atau kode salah." };
@@ -90,7 +90,7 @@ export async function disableTwoFactor(proof: string): Promise<{ ok: true } | Fa
 }
 
 export async function regenerateRecoveryCodes(proof: string): Promise<{ ok: true; codes: string[] } | Fail> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (!allowAttempt(user.id)) return tooMany;
   if (!(await proveIdentity(user.id, proof))) return { ok: false, error: "Password atau kode salah." };

@@ -216,7 +216,7 @@ export async function getNavigation(locale?: string): Promise<NavTab[]> {
   const [navigation, pagesById] = await Promise.all([readSetting<NavigationData>("navigation"), pagesForLocale(locale)]);
   return (navigation?.tabs ?? []).flatMap((tab) => {
     const sections = tab.sections
-      .map((section) => ({ title: (locale && section.titles?.[locale]) || section.title, image: section.image, items: resolveItems(section.items, pagesById) }))
+      .map((section) => ({ id: section.id, title: (locale && section.titles?.[locale]) || section.title, image: section.image, items: resolveItems(section.items, pagesById) }))
       .filter((section) => section.items.length > 0);
     const resolved: NavTab = { title: (locale && tab.titles?.[locale]) || tab.title, href: "", sections };
     const first = tabPages(resolved)[0];

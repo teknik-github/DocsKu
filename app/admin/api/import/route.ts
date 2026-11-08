@@ -1,5 +1,6 @@
 import { isSameOrigin } from "@/lib/auth/request";
 import { readSessionUser } from "@/lib/auth/session";
+import { can } from "@/lib/auth/permissions";
 import { IMPORT_LIMITS, parseUpload } from "@/lib/import";
 
 /** Step 1 of Halaman → Impor: reads the uploaded files ("files", multipart) and returns the preview. */
@@ -7,6 +8,7 @@ export async function POST(request: Request) {
   if (!isSameOrigin(request)) return Response.json({ error: "Permintaan dari situs lain ditolak." }, { status: 403 });
   const user = await readSessionUser();
   if (!user) return Response.json({ error: "Sesi Anda berakhir. Silakan masuk lagi." }, { status: 401 });
+  if (!can(user, "pages.import")) return Response.json({ error: "Kontributor tidak bisa mengimpor halaman." }, { status: 403 });
 
   const length = Number(request.headers.get("content-length") ?? 0);
   if (length > IMPORT_LIMITS.uploadBytes + 1024 * 1024) return Response.json({ error: "Unggahan maksimal 50 MB." }, { status: 413 });

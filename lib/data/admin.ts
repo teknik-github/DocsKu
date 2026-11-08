@@ -1,8 +1,9 @@
 import "server-only";
+import { can } from "@/lib/auth/permissions";
 import { and, asc, count, desc, eq, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
-import type { PageStatus } from "@/db/schema";
+import type { PageStatus, Role } from "@/db/schema";
 import { homeTemplate } from "@/lib/content/home-template";
 import { dueAtSql } from "@/lib/review";
 
@@ -37,13 +38,16 @@ const pageListColumns = {
   visibility: schema.pages.visibility,
   locale: schema.pages.locale,
   translationOf: schema.pages.translationOf,
+  approvalStatus: schema.pages.approvalStatus,
   publishedAt: schema.pages.publishedAt,
   updatedAt: schema.pages.updatedAt,
   updatedBy: schema.users.name,
 };
 
-export async function listPages({ status, q }: { status?: PageStatus; q?: string } = {}) {
+/** Doc pages for the Halaman list; `ownedBy` (contributors) keeps only pages they wrote or own. */
+export async function listPages({ status, q, ownedBy }: { status?: PageStatus; q?: string; ownedBy?: string } = {}) {
   const filters: SQL[] = [eq(schema.pages.kind, "doc")];
+  if (ownedBy) filters.push(or(eq(schema.pages.authorId, ownedBy), eq(schema.pages.ownerId, ownedBy))!);
   if (status) filters.push(eq(schema.pages.status, status));
   if (q?.trim()) {
     const term = `%${q.trim().replace(/[%_\\]/g, "\\$&")}%`;
@@ -126,7 +130,7 @@ export async function listUsers() {
     id: string;
     name: string;
     email: string;
-    role: "admin" | "editor";
+    role: Role;
     created_at: Date | string;
     pages: number;
     last_login: Date | string | null;
@@ -189,12 +193,25 @@ export async function ensureHomePage(userId: string, siteName: string) {
 }
 
 /** Badges in the dashboard sidebar: things waiting for someone. One small query per page load. */
-export async function getNavCounts() {
-  const [row] = await db.execute<{ comments: number; feedback: number; drafts: number; review: number }>(sql`
+/**
+ * Sidebar badges. Staff: the queues they handle (pending comments, reader
+ * messages, drafts, overdue reviews, pages waiting for approval). A contributor:
+ * only their own drafts and pages sent back with changes requested.
+ */
+export async function getNavCounts(user?: { id: string; role: Role }) {
+  if (user && !can(user, "pages.editAny")) {
+    const [own] = await db.execute<{ drafts: number; changes: number }>(sql`
+      select
+        (select count(*) from pages where kind = 'doc' and (author_id = ${user.id} or owner_id = ${user.id}) and (status = 'draft' or has_changes))::int as drafts,
+        (select count(*) from pages where kind = 'doc' and (author_id = ${user.id} or owner_id = ${user.id} or approval_requested_by_id = ${user.id}) and approval_status = 'changes_requested')::int as changes`);
+    return { comments: 0, feedback: 0, review: 0, approvals: 0, drafts: own?.drafts ?? 0, changes: own?.changes ?? 0 };
+  }
+  const [row] = await db.execute<{ comments: number; feedback: number; drafts: number; review: number; approvals: number }>(sql`
     select
       (select count(*) from pages p where p.kind = 'doc' and p.status = 'published' and ${dueAtSql} < now())::int as review,
       (select count(*) from page_comments where status = 'pending')::int as comments,
       (select count(*) from page_feedback where not resolved and comment is not null)::int as feedback,
-      (select count(*) from pages where kind = 'doc' and (status = 'draft' or has_changes))::int as drafts`);
-  return row ?? { comments: 0, feedback: 0, drafts: 0, review: 0 };
+      (select count(*) from pages where kind = 'doc' and (status = 'draft' or has_changes))::int as drafts,
+      (select count(*) from pages where kind = 'doc' and approval_status = 'pending')::int as approvals`);
+  return { ...(row ?? { comments: 0, feedback: 0, drafts: 0, review: 0, approvals: 0 }), changes: 0 };
 }

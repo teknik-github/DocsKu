@@ -1,4 +1,5 @@
 import "server-only";
+import type { Role } from "@/db/schema";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -366,7 +367,7 @@ const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLow
 export async function runImport(
   id: string,
   choices: ImportChoices,
-  user: { id: string; role: "admin" | "editor" },
+  user: { id: string; role: Role },
 ): Promise<ImportResult | { error: string }> {
   const found = await readBundle(id, user.id);
   if (!found) return { error: "Unggahan sudah kedaluwarsa. Unggah berkasnya lagi." };

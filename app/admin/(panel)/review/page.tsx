@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, ExternalLink, FileText, Globe, Link2Off } from "lucide-react";
-import { requireUser } from "@/lib/auth/dal";
+import { requirePermission } from "@/lib/auth/dal";
 import { getReviewSettings, isRefusal, listReviewPages, scanLinks, type LinkProblem } from "@/lib/review";
 import { formatDateTime } from "@/components/admin/format";
 import { PageHeader, Panel } from "@/components/admin/ui";
@@ -31,7 +31,7 @@ export default function ReviewPage({ searchParams }: PageProps<"/admin/review">)
 }
 
 async function Review({ searchParams }: Pick<PageProps<"/admin/review">, "searchParams">) {
-  const user = await requireUser();
+  const user = await requirePermission("review.manage");
   const params = await searchParams;
   const tab = params.tab === "tautan" ? "tautan" : "jadwal";
   const mine = params.milik === "saya";

@@ -27,6 +27,8 @@ export const REVISION_REASONS: Record<string, string> = {
   schedule: "Dijadwalkan",
   restore: "Dipulihkan",
   "before-restore": "Sebelum dipulihkan",
+  "before-overwrite": "Sebelum ditimpa",
+  "conflict-local": "Salinan Anda saat bentrok",
   import: "Diimpor",
   ai: "Dibuat dengan AI",
   "ai-edit": "Sebelum perubahan AI",

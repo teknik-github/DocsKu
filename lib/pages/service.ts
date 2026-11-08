@@ -7,6 +7,8 @@ import { mdxToDoc } from "@/lib/content/mdx-to-doc";
 import { slugify, uniqueSlug } from "@/lib/slug";
 import { addToNavigation, prepareForPublish, readAutomation, resolveSection, type Filled } from "@/lib/automation";
 import { forgetRedirects } from "@/lib/redirects";
+import { forgetRouteExistence } from "@/lib/route-exists";
+import { notify } from "@/lib/notify";
 
 /**
  * Page operations shared by the dashboard's server actions and the MCP
@@ -93,14 +95,68 @@ export async function addRevision(pageId: string, draft: Draft, reason: string, 
     .where(and(eq(schema.pageRevisions.pageId, pageId), notInArray(schema.pageRevisions.id, keep)));
 }
 
+/** Someone else saved the working copy since the editor loaded it. */
+export type Conflict = { version: number; by: string | null; at: string };
+export type SaveConflict = { ok: false; error: string; conflict: Conflict };
+
+/** The page's current working-copy version and who saved it last, for conflict messages. */
+export async function currentVersion(pageId: string): Promise<Conflict | null> {
+  const [row] = await db
+    .select({ version: schema.pages.draftVersion, at: schema.pages.updatedAt, by: schema.users.name })
+    .from(schema.pages)
+    .leftJoin(schema.users, eq(schema.users.id, schema.pages.updatedById))
+    .where(eq(schema.pages.id, pageId));
+  return row ? { version: row.version, by: row.by, at: row.at.toISOString() } : null;
+}
+
+export function conflictError(conflict: Conflict): SaveConflict {
+  return { ok: false, error: `Halaman ini diubah oleh ${conflict.by ?? "orang lain"} sejak Anda membukanya.`, conflict };
+}
+
+/** Bumps the working-copy version; every write of the draft* columns must include it. */
+export const nextDraftVersion = () => sql`${schema.pages.draftVersion} + 1`;
+
 /**
  * Saves the working copy. Visitors keep seeing the live version until the page
  * is (re)published. With `revisionReason` a revision is stored too.
+ *
+ * With `expectedVersion` (the editor sends the version it loaded) the save only
+ * happens when nobody saved in between; otherwise it returns a conflict and
+ * changes nothing. `force` overwrites anyway, after keeping the other person's
+ * version as a "before-overwrite" revision. Callers without a version (MCP,
+ * translations) save unconditionally, as before.
  */
-export async function saveWorkingCopy(pageId: string, draft: Draft, userId: string, revisionReason?: string) {
-  const [page] = await db.select({ status: schema.pages.status }).from(schema.pages).where(eq(schema.pages.id, pageId));
+export async function saveWorkingCopy(
+  pageId: string,
+  draft: Draft,
+  userId: string,
+  revisionReason?: string,
+  options: { expectedVersion?: number; force?: boolean } = {},
+): Promise<{ ok: true; savedAt: string; hasChanges: boolean; version: number } | { ok: false; error: string } | SaveConflict> {
+  const [page] = await db
+    .select({
+      status: schema.pages.status,
+      version: schema.pages.draftVersion,
+      title: schema.pages.draftTitle,
+      description: schema.pages.draftDescription,
+      content: schema.pages.draftContent,
+      seo: schema.pages.draftSeo,
+      cover: schema.pages.draftCoverImage,
+    })
+    .from(schema.pages)
+    .where(eq(schema.pages.id, pageId));
   if (!page) return { ok: false as const, error: NOT_FOUND };
+  const { expectedVersion, force = false } = options;
+  if (expectedVersion !== undefined && expectedVersion !== page.version) {
+    if (!force) {
+      const conflict = await currentVersion(pageId);
+      return conflict ? conflictError(conflict) : { ok: false as const, error: NOT_FOUND };
+    }
+    // Overwriting someone else's save: keep theirs in the history first.
+    await addRevision(pageId, { title: page.title, description: page.description, content: page.content, seo: page.seo, cover: page.cover }, "before-overwrite", userId);
+  }
   const hasChanges = page.status !== "draft";
+  const versionGuard = expectedVersion !== undefined && !force ? eq(schema.pages.draftVersion, expectedVersion) : undefined;
   const [saved] = await db
     .update(schema.pages)
     .set({
@@ -109,18 +165,25 @@ export async function saveWorkingCopy(pageId: string, draft: Draft, userId: stri
       draftContent: draft.content,
       draftSeo: draft.seo,
       draftCoverImage: draft.cover ?? null,
+      draftVersion: nextDraftVersion(),
       hasChanges,
       updatedById: userId,
     })
-    .where(eq(schema.pages.id, pageId))
-    .returning({ updatedAt: schema.pages.updatedAt });
+    .where(versionGuard ? and(eq(schema.pages.id, pageId), versionGuard) : eq(schema.pages.id, pageId))
+    .returning({ updatedAt: schema.pages.updatedAt, version: schema.pages.draftVersion });
+  if (!saved) {
+    // Someone saved between the read above and this update.
+    const conflict = await currentVersion(pageId);
+    return conflict ? conflictError(conflict) : { ok: false as const, error: NOT_FOUND };
+  }
   if (revisionReason) await addRevision(pageId, draft, revisionReason, userId);
-  return { ok: true as const, savedAt: saved.updatedAt.toISOString(), hasChanges };
+  return { ok: true as const, savedAt: saved.updatedAt.toISOString(), hasChanges, version: saved.version };
 }
 
 export type PublishResult =
   | { ok: false; error: string }
-  | { ok: true; savedAt: string; hasChanges: false; status: "published" | "scheduled"; publishedAt: string; slug: string; filled: Filled };
+  | SaveConflict
+  | { ok: true; savedAt: string; hasChanges: false; status: "published" | "scheduled"; publishedAt: string; slug: string; filled: Filled; version: number };
 
 /**
  * Publishes a working copy now, or schedules it when `publishAt` is in the
@@ -134,10 +197,13 @@ export async function publishWorkingCopy(
   publishAt: string | null,
   userId: string,
   invalidate: Invalidate,
+  /** The working-copy version the editor loaded; publishing someone else's newer save is refused. */
+  expectedVersion?: number,
 ): Promise<PublishResult> {
   if (!input.title) return { ok: false, error: "Beri judul sebelum menerbitkan." };
   const [page] = await db
     .select({
+      version: schema.pages.draftVersion,
       status: schema.pages.status,
       publishedAt: schema.pages.publishedAt,
       kind: schema.pages.kind,
@@ -147,6 +213,10 @@ export async function publishWorkingCopy(
     .from(schema.pages)
     .where(eq(schema.pages.id, pageId));
   if (!page) return { ok: false, error: NOT_FOUND };
+  if (expectedVersion !== undefined && expectedVersion !== page.version) {
+    const conflict = await currentVersion(pageId);
+    if (conflict) return conflictError(conflict);
+  }
 
   let status: "published" | "scheduled" = "published";
   let publishedAt = page.status === "published" && page.publishedAt ? page.publishedAt : new Date();
@@ -185,6 +255,10 @@ export async function publishWorkingCopy(
       draftSeo: draft.seo,
       draftCoverImage: draft.cover ?? null,
       ...live,
+      draftVersion: nextDraftVersion(),
+      // Publishing (or scheduling) settles any pending approval request.
+      approvalStatus: null,
+      approvalNote: null,
       slug,
       navSection,
       status,
@@ -192,17 +266,23 @@ export async function publishWorkingCopy(
       updatedById: userId,
     })
     .where(eq(schema.pages.id, pageId))
-    .returning({ updatedAt: schema.pages.updatedAt });
+    .returning({ updatedAt: schema.pages.updatedAt, version: schema.pages.draftVersion });
   await addRevision(pageId, draft, status === "published" ? "publish" : "schedule", userId);
   if (status === "published") {
     invalidate("pages");
     forgetRedirects();
+    forgetRouteExistence();
     if (page.kind === "doc" && firstPublish && settings.navigation) {
       const added = await addToNavigation(pageId, navSection);
       if (added) {
         filled = { ...filled, section: added };
         invalidate("navigation");
       }
+    }
+    // The one place a page.published notification is raised for a person's publish (approvals included).
+    if (page.kind === "doc" && firstPublish) {
+      const [actor] = await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, userId));
+      await notify({ type: "page.published", pageId, title: draft.title, href: `/docs/${slug}`, by: actor?.name ?? "Tim", actorId: userId });
     }
   }
   return {
@@ -213,6 +293,7 @@ export async function publishWorkingCopy(
     publishedAt: publishedAt.toISOString(),
     slug,
     filled,
+    version: saved.version,
   };
 }
 
@@ -226,6 +307,7 @@ export async function unpublish(pageId: string, userId: string, invalidate: Inva
   if (!page) return { ok: false as const, error: NOT_FOUND };
   invalidate("pages");
   forgetRedirects();
+  forgetRouteExistence();
   return { ok: true as const, savedAt: page.updatedAt.toISOString(), hasChanges: false };
 }
 

@@ -48,6 +48,8 @@ export function SettingsPanel({
   onRestore,
   onFlush,
   isAdmin = false,
+  staff = true,
+  canTemplates = true,
   onClose,
 }: {
   pageId: string;
@@ -70,6 +72,9 @@ export function SettingsPanel({
   /** Saves pending edits now (before saving the page as a template). */
   onFlush: () => Promise<boolean>;
   isAdmin?: boolean;
+  /** Admins and editors; contributors don't get publishing settings (featured, author, visibility, review). */
+  staff?: boolean;
+  canTemplates?: boolean;
   onClose: () => void;
 }) {
   const [value, setValue] = useState(slug);
@@ -167,7 +172,7 @@ export function SettingsPanel({
           </div>
         </section>
 
-        {!isHome && (
+        {!isHome && staff && (
           <label className="flex items-start gap-2 text-sm">
             <input
               type="checkbox"
@@ -192,15 +197,15 @@ export function SettingsPanel({
           </label>
         )}
 
-        {!isHome && <AuthorSection pageId={pageId} />}
+        {!isHome && staff && <AuthorSection pageId={pageId} />}
 
         {!isHome && <TranslationSection pageId={pageId} status={status} onKind={setIsTranslation} />}
 
-        {!isHome && !isTranslation && <VisibilityToggle pageId={pageId} initial={visibility} />}
+        {!isHome && !isTranslation && staff && <VisibilityToggle pageId={pageId} initial={visibility} />}
 
         {!isHome && !isTranslation && <NavigationSection pageId={pageId} navigation={navigation} aiEnabled={aiEnabled} />}
 
-        {!isHome && <ReviewSection pageId={pageId} status={status} />}
+        {!isHome && staff && <ReviewSection pageId={pageId} status={status} />}
 
         <SeoSection
           seo={seo}
@@ -212,9 +217,10 @@ export function SettingsPanel({
 
         <RevisionHistory pageId={pageId} revisions={revisions} status={status} isAdmin={isAdmin} onRestore={onRestore} />
 
-        {!isHome && <SaveTemplateSection pageId={pageId} title={title} onFlush={onFlush} />}
+        {!isHome && canTemplates && <SaveTemplateSection pageId={pageId} title={title} onFlush={onFlush} />}
 
-        {!isHome && (
+        {/* Contributors may only delete their own pages that were never published (the server checks). */}
+        {!isHome && (staff || !publishedAt) && (
         <section className="border-t border-line pt-6">
           <Button
             variant="danger"

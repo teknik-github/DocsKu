@@ -3,6 +3,8 @@ import Link from "next/link";
 import { FileQuestion, Files, LayoutTemplate, ListTree, Lock, Plus, Search, Upload } from "lucide-react";
 import { NewPageButton } from "@/components/admin/new-page-button";
 import { requireUser } from "@/lib/auth/dal";
+import { can } from "@/lib/auth/permissions";
+import { presenceByPage } from "@/lib/collab/presence";
 import { listPages } from "@/lib/data/admin";
 import { readNavigation } from "@/lib/automation";
 import { categoryGroups, listedIn, type Category } from "@/lib/categories";
@@ -30,21 +32,16 @@ const NONE = "tanpa";
 
 export default function PagesPage({ searchParams }: PageProps<"/admin/pages">) {
   return (
-    <>
-      <PageHeader
-        title="Halaman"
-        description="Kelompokkan halaman ke dalam kategori, lalu tulis halaman baru langsung di kategorinya."
-        actions={
-          <Link href="/admin/pages/impor" className={buttonClass("secondary")}>
-            <Upload className="size-4" />
-            Impor
-          </Link>
-        }
-      />
-      <Suspense fallback={<div className="h-96 animate-pulse rounded-xl bg-fill" />}>
-        <PagesView searchParams={searchParams} />
-      </Suspense>
-    </>
+    <Suspense
+      fallback={
+        <>
+          <PageHeader title="Halaman" description="Kelompokkan halaman ke dalam kategori, lalu tulis halaman baru langsung di kategorinya." />
+          <div className="h-96 animate-pulse rounded-xl bg-fill" />
+        </>
+      }
+    >
+      <PagesView searchParams={searchParams} />
+    </Suspense>
   );
 }
 
@@ -55,10 +52,14 @@ function pageOrder(items: NavItemData[]): string[] {
 async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "searchParams">) {
   const user = await requireUser();
   const isAdmin = user.role === "admin";
+  const staff = can(user, "pages.editAny");
   const params = await searchParams;
   const status = FILTERS.find((f) => f.status === params.status)?.status;
+  /** `?persetujuan=1`: pages waiting for approval (staff) or the contributor's submitted/returned pages. */
+  const approvalOnly = params.persetujuan === "1";
   const q = typeof params.q === "string" ? params.q.trim() : "";
-  const [navigation, everyPage, languages] = await Promise.all([readNavigation(), listPages(), readLanguages()]);
+  const [navigation, everyPage, languages] = await Promise.all([readNavigation(), listPages({ ownedBy: staff ? undefined : user.id }), readLanguages()]);
+  const editing = await presenceByPage(everyPage.map((page) => page.id));
   // Translations are listed under their original (badges), or on their own with ?bahasa=<code>.
   const language = languages.languages.find((l) => l.code === params.bahasa)?.code ?? null;
   const translationsOf = new Map<string, typeof everyPage>();
@@ -104,6 +105,7 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
   let pages = allPages.filter(
     (page) =>
       (!status || page.status === status) &&
+      (!approvalOnly || (staff ? page.approvalStatus === "pending" : Boolean(page.approvalStatus))) &&
       (!term || page.title.toLowerCase().includes(term) || page.slug.toLowerCase().includes(term)) &&
       (selected === ALL || (categoryOf(page) ?? NONE) === selected),
   );
@@ -114,12 +116,14 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
     pages = [...pages].sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
   }
 
-  const href = (next: { kategori?: string; status?: PageStatus | null; bahasa?: string | null }) => {
+  const href = (next: { kategori?: string; status?: PageStatus | null; bahasa?: string | null; persetujuan?: boolean }) => {
     const query = new URLSearchParams();
     const kategori = next.kategori ?? selected;
     if (kategori !== ALL) query.set("kategori", kategori);
-    const s = next.status === undefined ? status : next.status;
+    const approval = next.persetujuan ?? (next.status === undefined ? approvalOnly : false);
+    const s = next.status === undefined ? (approval ? undefined : status) : next.status;
     if (s) query.set("status", s);
+    if (approval) query.set("persetujuan", "1");
     if (q) query.set("q", q);
     const b = next.bahasa === undefined ? language : next.bahasa;
     if (b) query.set("bahasa", b);
@@ -141,7 +145,26 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
     </Link>
   );
 
+  const approvalCount = allPages.filter((page) => (staff ? page.approvalStatus === "pending" : Boolean(page.approvalStatus))).length;
+
   return (
+    <>
+    <PageHeader
+      title={staff ? "Halaman" : "Halaman saya"}
+      description={
+        staff
+          ? "Kelompokkan halaman ke dalam kategori, lalu tulis halaman baru langsung di kategorinya."
+          : "Halaman yang Anda tulis atau yang ditugaskan kepada Anda. Ajukan halaman untuk ditinjau dari editor; editor atau admin yang menerbitkannya."
+      }
+      actions={
+        can(user, "pages.import") ? (
+          <Link href="/admin/pages/impor" className={buttonClass("secondary")}>
+            <Upload className="size-4" />
+            Impor
+          </Link>
+        ) : undefined
+      }
+    />
     <div className="grid items-start gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
       {/* Left: categories */}
       <aside className="space-y-4 lg:sticky lg:top-6">
@@ -235,18 +258,28 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex gap-1 rounded-lg bg-fill p-1">
+          <div className="flex max-w-full flex-wrap gap-1 rounded-lg bg-fill p-1">
             {FILTERS.map((filter) => (
               <Link
                 key={filter.label}
-                href={href({ status: filter.status ?? null })}
+                href={href({ status: filter.status ?? null, persetujuan: false })}
                 className={`rounded-md px-3 py-1 text-sm transition-colors ${
-                  filter.status === status ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
+                  !approvalOnly && filter.status === status ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
                 }`}
               >
                 {filter.label}
               </Link>
             ))}
+            <Link
+              href={href({ status: null, persetujuan: true })}
+              data-testid="approval-filter"
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm transition-colors ${
+                approvalOnly ? "bg-surface text-fg shadow-sm" : "text-fg-muted hover:text-fg"
+              }`}
+            >
+              {staff ? "Menunggu persetujuan" : "Diajukan"}
+              {approvalCount > 0 && <span className="rounded-full bg-accent px-1.5 text-[10px] font-semibold text-white tabular-nums">{approvalCount}</span>}
+            </Link>
           </div>
           {languages.languages.length > 0 && (
             <div className="flex gap-1 rounded-lg bg-fill p-1" aria-label="Bahasa" data-testid="language-filter">
@@ -274,6 +307,7 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
         </div>
 
         <PagesTable
+          staff={staff}
           showCategory={selected === ALL}
           moveTargets={isAdmin && groups.length > 0 ? groups : undefined}
           empty={current && !q && !status ? "Belum ada halaman di kategori ini. Klik “Halaman baru di sini” untuk menulis yang pertama." : undefined}
@@ -287,6 +321,7 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
               category: info ? `${info.group} › ${info.title}` : null,
               pendingCategory: !page.translationOf && Boolean(category) && !listed.has(page.id),
               locale: page.translationOf ? page.locale : null,
+              editing: editing.get(page.id),
               translations: page.translationOf
                 ? undefined
                 : (translationsOf.get(page.id) ?? []).map((t) => ({ id: t.id, locale: t.locale, status: t.status })),
@@ -295,5 +330,6 @@ async function PagesView({ searchParams }: Pick<PageProps<"/admin/pages">, "sear
         />
       </section>
     </div>
+    </>
   );
 }

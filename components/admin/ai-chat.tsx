@@ -312,7 +312,12 @@ export function AiChat({
         result.ok ? { status: "applied", draftId: result.id, pageStatus: result.status, error: undefined } : { error: result.error },
       );
     } else {
-      await onApplyEdit?.(p);
+      try {
+        await onApplyEdit?.(p);
+      } catch {
+        // The editor refused (e.g. a conflicting save by someone else) and says why; the proposal stays applicable.
+        return;
+      }
       await setProposal(messageId, p.id, { status: "applied" });
     }
   }

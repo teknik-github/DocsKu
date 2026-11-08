@@ -68,7 +68,7 @@ export function isPublicAddress(address: string): boolean {
 class BlockedAddress extends Error {}
 
 /** DNS lookup for http(s).request that refuses non-public addresses. */
-const guardedLookup: LookupFunction = (hostname, options, callback) => {
+export const guardedLookup: LookupFunction = (hostname, options, callback) => {
   dnsLookup(hostname, { ...options, all: true }, (error, addresses) => {
     if (error) return callback(error, "", 0);
     const list = addresses as LookupAddress[];

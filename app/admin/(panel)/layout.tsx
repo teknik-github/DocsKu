@@ -23,7 +23,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
 
 async function AuthedShell({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const [counts, site, jar, security, profile] = await Promise.all([getNavCounts(), getSiteSettings(), cookies(), getSecuritySettings(), getAuthor(user.id)]);
+  const [counts, site, jar, security, profile] = await Promise.all([getNavCounts(user), getSiteSettings(), cookies(), getSecuritySettings(), getAuthor(user.id)]);
   // Pengaturan → Keamanan can require 2FA for admins: remind them on every page until it's on.
   const needs2fa = user.role === "admin" && security.requireAdmin2fa && !(await twoFactorStatus(user.id)).enabled;
   return (

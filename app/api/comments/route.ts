@@ -6,6 +6,9 @@ import { clientIp } from "@/lib/auth/request";
 import { addComment, listPublicComments, MAX_COMMENT } from "@/lib/comments";
 import { getCommentSettings } from "@/lib/data/site";
 import { readPublicJson } from "@/lib/reader";
+import { eq } from "drizzle-orm";
+import { db, schema } from "@/db";
+import { notify } from "@/lib/notify";
 
 /**
  * Public comments of a docs page. GET lists the approved ones (the article
@@ -77,6 +80,18 @@ export async function POST(request: Request) {
   const status = links > MAX_LINKS ? "spam" : settings.moderation || links > 0 ? "pending" : "approved";
   const result = await addComment({ ...comment, name, email, status, staff: false });
   if ("error" in result) return json({ error: result.error }, 404);
+  if (result.status !== "spam") {
+    const [page] = await db.select({ title: schema.pages.title }).from(schema.pages).where(eq(schema.pages.id, result.pageId));
+    await notify({
+      type: "comment.new",
+      commentId: result.id,
+      pageTitle: page?.title ?? comment.slug,
+      href: `/docs/${comment.slug}#komentar`,
+      author: name,
+      excerpt: comment.body.length > 400 ? `${comment.body.slice(0, 400)}…` : comment.body,
+      pending: result.status === "pending",
+    });
+  }
   // A spam verdict is not told to the sender.
   return json({ status: result.status === "spam" ? "pending" : result.status }, 201);
 }

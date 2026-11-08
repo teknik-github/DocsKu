@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { logActivity } from "@/lib/activity";
 import { authorize } from "@/lib/auth/dal";
+import { canEditPage } from "@/lib/auth/page-access";
 import { checkExternalLinks } from "@/lib/link-check";
 import { dueAtSql, getReviewSettings, REVIEW_INTERVALS, scanLinks } from "@/lib/review";
 import type { ReviewSettings } from "@/lib/site-types";
@@ -29,8 +30,9 @@ export type PageReviewInfo = {
 
 /** Review state of one page, for the editor's settings panel. */
 export async function getPageReview(pageId: string): Promise<PageReviewInfo | null> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user || !idSchema.safeParse(pageId).success) return null;
+  if (!(await canEditPage(user, pageId))) return null;
   const [rows, users, settings] = await Promise.all([
     db.execute<{ owner_id: string | null; author_name: string | null; review_interval_days: number | null; reviewed_at: Date | string | null; due_at: Date | string | null; days: number | null; status: string }>(sql`
       select p.owner_id, a.name as author_name, p.review_interval_days, p.reviewed_at, p.status::text as status,

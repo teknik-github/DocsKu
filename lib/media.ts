@@ -44,3 +44,16 @@ export function detectImage(bytes: Uint8Array): ImageExt | null {
 }
 
 export const mediaUrl = (filename: string) => `/media/${filename}`;
+
+/** Where the media route keeps resized WebP variants (`<name>-<width>.webp`); rebuilt on demand, safe to delete. */
+export function variantDir() {
+  return path.join(/*turbopackIgnore: true*/ uploadDir(), ".cache");
+}
+
+/** Deletes the resized variants of an upload (after the upload itself is deleted). */
+export async function removeVariants(filename: string) {
+  const { readdir, unlink } = await import("node:fs/promises");
+  const base = filename.replace(/\.[a-z]+$/, "");
+  const names = await readdir(variantDir()).catch(() => [] as string[]);
+  await Promise.all(names.filter((name) => name.startsWith(`${base}-`)).map((name) => unlink(path.join(/*turbopackIgnore: true*/ variantDir(), name)).catch(() => {})));
+}

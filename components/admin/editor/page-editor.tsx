@@ -12,6 +12,7 @@ import { Placeholder } from "@tiptap/extensions";
 import { ArrowLeft, Eye, ImagePlus, Loader2, MessageSquareText, Settings2, Sparkles, X } from "lucide-react";
 import {
   discardChanges,
+  loadLatestDraft,
   publishPage,
   restoreRevision,
   saveDraft,
@@ -35,6 +36,7 @@ import {
 import { SlashCommand } from "@/components/admin/editor/slash-command";
 import { BlockInsertMenu, ImageBubbleMenu, TableBubbleMenu, TextBubbleMenu } from "@/components/admin/editor/menus";
 import { ImageDialog, uploadImage } from "@/components/admin/editor/image-dialog";
+import { EditorMoreMenu } from "@/components/admin/editor/more-menu";
 import { PublishMenu } from "@/components/admin/editor/publish-menu";
 import { AiPanel, type AiJob } from "@/components/admin/editor/ai-panel";
 import { AiChat } from "@/components/admin/ai-chat";
@@ -47,6 +49,10 @@ import type { PageSeo } from "@/lib/site-types";
 import { SettingsPanel, type EditorNavigation, type RevisionItem } from "@/components/admin/editor/settings-panel";
 import { StatusBadge, buttonClass } from "@/components/admin/ui";
 import { EditorOutline, InlineEditorOutline } from "@/components/admin/editor/editor-outline";
+import { ApprovalBanner, ConflictBanner, PresenceAvatars, SubmitButton, usePresence, type Conflict } from "@/components/admin/editor/collab";
+import { approvePage, requestChanges, submitForApproval, withdrawSubmission } from "@/app/admin/_actions/approval";
+import { confirmDialog, promptDialog } from "@/components/admin/dialog";
+import type { ApprovalInfo } from "@/lib/collab/approval";
 
 export type EditorPage = {
   id: string;
@@ -63,7 +69,13 @@ export type EditorPage = {
   featured: boolean;
   visibility: "public" | "internal";
   updatedAt: string;
+  /** Working-copy version this editor loaded; sent with every save to detect conflicting edits. */
+  draftVersion: number;
+  approval: ApprovalInfo;
 };
+
+/** What this person may do here (lib/auth/permissions.ts); the server checks again. */
+export type EditorPermissions = { publish: boolean; approve: boolean; staff: boolean; templates: boolean };
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 
@@ -97,6 +109,8 @@ export function PageEditor({
   aiEnabled = false,
   navigation,
   isAdmin = false,
+  permissions = { publish: true, approve: true, staff: true, templates: true },
+  viewer,
 }: {
   page: EditorPage;
   revisions: RevisionItem[];
@@ -105,6 +119,8 @@ export function PageEditor({
   navigation: EditorNavigation;
   /** Admins also get a link to the page's activity log. */
   isAdmin?: boolean;
+  permissions?: EditorPermissions;
+  viewer?: { id: string; name: string };
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(page.title);
@@ -142,31 +158,63 @@ export function PageEditor({
   const inFlight = useRef<Promise<unknown> | null>(null);
   const contentBroken = useRef(false);
   const [hoverBus] = useState(createHoverBus);
+  /** The working-copy version on the server that this editor's content is based on. */
+  const serverVersion = useRef(page.draftVersion);
+  /** Set while a save was refused because someone else saved in between: autosave pauses. */
+  const conflictRef = useRef(false);
+  const [conflict, setConflict] = useState<{ info: Conflict; mode: "conflict" | "stale" } | null>(null);
+  const [approval, setApproval] = useState<ApprovalInfo>(page.approval);
+  /** A newer version the person chose to ignore ("Abaikan"): not announced again. */
+  const dismissedVersion = useRef(0);
+  const others = usePresence(page.id, (remote) => {
+    // The heartbeat saw a newer save than ours (another person, or another tab).
+    // While our own save is in flight its new version may arrive here first: ignore that.
+    if (inFlight.current || busy) return;
+    if (remote.version > Math.max(serverVersion.current, dismissedVersion.current) && !conflictRef.current) {
+      setConflict((shown) => shown ?? { info: remote, mode: "stale" });
+    }
+  });
 
   function flash(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2500);
   }
 
-  async function save(revision = false): Promise<boolean> {
+  /** The editor's current working copy, as sent to the server. */
+  function localDraft() {
+    const editor = editorRef.current;
+    if (!editor) return null;
+    return { title: titleRef.current, description: descriptionRef.current, content: docJSON(editor), seo: seoRef.current, cover: coverRef.current };
+  }
+
+  async function save(revision = false, force = false): Promise<boolean> {
     window.clearTimeout(timer.current);
     if (inFlight.current) await inFlight.current;
     const editor = editorRef.current;
     if (!editor || contentBroken.current) return false;
+    // After a conflict nothing saves until the person picks "Muat" or "Timpa".
+    if (conflictRef.current && !force) return false;
     const startVersion = version.current;
     setSaveState("saving");
-    const request = saveDraft(
-      page.id,
-      { title: titleRef.current, description: descriptionRef.current, content: docJSON(editor), seo: seoRef.current, cover: coverRef.current },
-      revision,
-    );
+    const request = saveDraft(page.id, localDraft()!, revision, { expectedVersion: serverVersion.current, force });
     inFlight.current = request;
-    const result = await request.catch(() => ({ ok: false as const, error: "Tidak bisa terhubung ke server." }));
+    const result = await request.catch(() => ({ ok: false as const, error: "Tidak bisa terhubung ke server.", conflict: undefined }));
     inFlight.current = null;
     if (!result.ok) {
+      if (result.conflict) {
+        conflictRef.current = true;
+        setConflict({ info: result.conflict, mode: "conflict" });
+        setSaveState("dirty");
+        return false;
+      }
       setSaveState("error");
       setError(result.error);
       return false;
+    }
+    if (result.version !== undefined) serverVersion.current = result.version;
+    if (force) {
+      conflictRef.current = false;
+      setConflict(null);
     }
     setError("");
     setHasChanges(result.hasChanges);
@@ -179,6 +227,7 @@ export function PageEditor({
   function scheduleSave() {
     window.clearTimeout(timer.current);
     setSaveState("dirty");
+    if (conflictRef.current) return;
     timer.current = window.setTimeout(() => void save(), AUTOSAVE_MS);
   }
 
@@ -285,6 +334,104 @@ export function PageEditor({
     };
   });
 
+  /** "Muat versi terbaru": keeps this editor's copy as a revision, then loads the saved one. */
+  async function reloadLatest() {
+    setBusy(true);
+    const result = await loadLatestDraft(page.id, localDraft());
+    setBusy(false);
+    if (!result.ok) return setError(result.error);
+    conflictRef.current = false;
+    setConflict(null);
+    serverVersion.current = result.version;
+    loadDraft(result.draft);
+    setHasChanges(result.hasChanges);
+    flash("Versi terbaru dimuat");
+    router.refresh();
+  }
+
+  async function overwrite() {
+    const ok = await confirmDialog({
+      title: "Timpa dengan versi Anda?",
+      message: "Versi yang disimpan orang lain akan diganti dengan isi editor ini. Versi mereka tetap tersimpan di Riwayat revisi.",
+      confirmLabel: "Timpa",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setBusy(true);
+    const saved = await save(true, true);
+    setBusy(false);
+    if (saved) {
+      flash("Versi Anda disimpan");
+      router.refresh();
+    }
+  }
+
+  async function submit() {
+    if (!(await save())) return;
+    const note = await promptDialog({
+      title: "Ajukan untuk ditinjau",
+      message: "Editor atau admin akan meninjau lalu menerbitkan halaman ini, atau meminta perubahan.",
+      label: "Catatan untuk peninjau (opsional)",
+      placeholder: "Mis. sudah saya cek ulang langkah instalasinya",
+      confirmLabel: "Ajukan",
+      optional: true,
+    });
+    if (note === null) return;
+    setBusy(true);
+    const result = await submitForApproval(page.id, note);
+    setBusy(false);
+    if (!result.ok) return setError(result.error);
+    setApproval({ status: "pending", note: note || null, requestedBy: viewer?.name ?? null, requestedById: viewer?.id ?? null, requestedAt: new Date().toISOString() });
+    flash("Diajukan untuk ditinjau");
+    router.refresh();
+  }
+
+  async function withdraw() {
+    const ok = await confirmDialog({ title: "Batalkan pengajuan?", message: "Halaman tidak lagi menunggu persetujuan. Anda bisa mengajukannya lagi nanti.", confirmLabel: "Batalkan pengajuan" });
+    if (!ok) return;
+    setBusy(true);
+    const result = await withdrawSubmission(page.id);
+    setBusy(false);
+    if (!result.ok) return setError(result.error);
+    setApproval(null);
+    flash("Pengajuan dibatalkan");
+    router.refresh();
+  }
+
+  async function approve() {
+    // Approving publishes what is saved: save this editor's edits first.
+    if (!(await save())) return;
+    setBusy(true);
+    const result = await approvePage(page.id, serverVersion.current);
+    setBusy(false);
+    if (!result.ok) return setError(result.error);
+    if (result.version !== undefined) serverVersion.current = result.version;
+    if (result.slug) setSlug(result.slug);
+    setApproval(null);
+    setStatus("published");
+    setHasChanges(false);
+    flash("Disetujui dan diterbitkan");
+    router.refresh();
+  }
+
+  async function askForChanges() {
+    const note = await promptDialog({
+      title: "Minta perubahan",
+      message: "Pengaju melihat catatan ini di editor dan bisa mengajukan lagi setelah memperbaikinya.",
+      label: "Apa yang perlu diubah?",
+      placeholder: "Mis. tambahkan langkah verifikasi setelah instalasi",
+      confirmLabel: "Kirim",
+    });
+    if (!note) return;
+    setBusy(true);
+    const result = await requestChanges(page.id, note);
+    setBusy(false);
+    if (!result.ok) return setError(result.error);
+    setApproval((current) => (current ? { ...current, status: "changes_requested", note } : current));
+    flash("Permintaan perubahan dikirim");
+    router.refresh();
+  }
+
   function loadDraft(draft: { title: string; description: string; content: JSONContent; seo?: PageSeo; cover?: string | null }) {
     seoRef.current = draft.seo ?? {};
     setSeo(seoRef.current);
@@ -306,16 +453,20 @@ export function PageEditor({
     if (!editor || contentBroken.current) return false;
     setBusy(true);
     const startVersion = version.current;
-    const result = await publishPage(
-      page.id,
-      { title: titleRef.current, description: descriptionRef.current, content: docJSON(editor), seo: seoRef.current, cover: coverRef.current },
-      when,
-    );
+    if (conflictRef.current) return false;
+    const result = await publishPage(page.id, localDraft()!, when, serverVersion.current);
     setBusy(false);
     if (!result.ok) {
+      if ("conflict" in result && result.conflict) {
+        conflictRef.current = true;
+        setConflict({ info: result.conflict, mode: "conflict" });
+        return false;
+      }
       setError(result.error);
       return false;
     }
+    serverVersion.current = result.version;
+    setApproval(null);
     setError("");
     setStatus(result.status);
     setPublishedAt(result.publishedAt);
@@ -371,6 +522,7 @@ export function PageEditor({
       setError(result.error);
       return false;
     }
+    if (result.version !== undefined) serverVersion.current = result.version;
     loadDraft(result.draft);
     setHasChanges(false);
     flash("Perubahan dibuang");
@@ -385,6 +537,7 @@ export function PageEditor({
       setError(result.error);
       return;
     }
+    if (result.version !== undefined) serverVersion.current = result.version;
     loadDraft(result.draft);
     setHasChanges(status !== "draft");
     flash("Revisi dipulihkan ke draf");
@@ -467,7 +620,11 @@ export function PageEditor({
   async function applyProposal(proposal: Proposal) {
     const editor = editorRef.current;
     if (!editor || contentBroken.current) return;
-    await save(true);
+    // Applying on top of someone else's newer save would lose one of the two: resolve the conflict first.
+    if (!(await save(true))) {
+      setError(conflictRef.current ? "Usulan belum diterapkan: halaman ini diubah orang lain. Muat versi terbaru atau timpa dulu, lalu terapkan lagi." : "Usulan belum diterapkan karena halaman gagal disimpan.");
+      throw new Error("save failed");
+    }
     if (proposal.title !== undefined) {
       titleRef.current = proposal.title;
       setTitle(proposal.title);
@@ -507,8 +664,9 @@ export function PageEditor({
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-line bg-page/95 px-4 backdrop-blur">
-        <Link href={backHref} onClick={leave} className={buttonClass("ghost", "sm")}>
+      {/* Below `sm` the header keeps to one line: AI Chat and Pratinjau move into the "⋯" menu. */}
+      <header className="sticky top-0 z-40 flex h-14 min-w-0 items-center gap-2 border-b border-line bg-page/95 px-3 backdrop-blur sm:gap-3 sm:px-4">
+        <Link href={backHref} onClick={leave} aria-label={isHome ? "Kembali ke Beranda" : "Kembali ke Halaman"} className={`${buttonClass("ghost", "sm")} shrink-0`}>
           <ArrowLeft className="size-4" />
           <span className="hidden sm:inline">{isHome ? "Beranda" : "Halaman"}</span>
         </Link>
@@ -517,12 +675,13 @@ export function PageEditor({
           <span className="hidden text-xs text-amber-600 sm:inline dark:text-amber-400">Perubahan belum terbit</span>
         )}
         <span
-          className={`text-xs ${saveState === "error" ? "text-red-600 dark:text-red-400" : "text-fg-subtle"}`}
+          className={`min-w-0 truncate text-xs ${saveState === "error" ? "text-red-600 dark:text-red-400" : "text-fg-subtle"}`}
           aria-live="polite"
         >
           {notice || SAVE_LABEL[saveState]}
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <PresenceAvatars others={others} />
           {aiEnabled && (
             <button
               type="button"
@@ -531,24 +690,47 @@ export function PageEditor({
                 setPanelOpen(false);
               }}
               aria-pressed={chatOpen}
-              className={`${buttonClass("ghost", "sm")} ${chatOpen ? "bg-fill text-fg" : ""}`}
+              className={`${buttonClass("ghost", "sm")} max-sm:hidden ${chatOpen ? "bg-fill text-fg" : ""}`}
             >
               <MessageSquareText className="size-4 text-accent" />
               <span className="hidden sm:inline">AI Chat</span>
             </button>
           )}
-          <button type="button" onClick={openPreview} className={buttonClass("ghost", "sm")}>
+          <button type="button" onClick={openPreview} className={`${buttonClass("ghost", "sm")} max-sm:hidden`}>
             <Eye className="size-4" />
             <span className="hidden sm:inline">Pratinjau</span>
           </button>
-          <PublishMenu
-            status={status}
-            publishedAt={publishedAt}
-            hasChanges={hasChanges}
-            busy={busy}
-            onPublish={publish}
-            onUnpublish={unpublish}
-            onDiscard={discard}
+          {permissions.publish || isHome ? (
+            <PublishMenu
+              status={status}
+              publishedAt={publishedAt}
+              hasChanges={hasChanges}
+              busy={busy}
+              onPublish={publish}
+              onUnpublish={unpublish}
+              onDiscard={discard}
+            />
+          ) : (
+            <SubmitButton pending={approval?.status === "pending"} busy={busy} onSubmit={submit} onWithdraw={withdraw} />
+          )}
+          <EditorMoreMenu
+            className="sm:hidden"
+            items={[
+              ...(aiEnabled
+                ? [
+                    {
+                      label: "AI Chat",
+                      icon: <MessageSquareText className="size-4 text-accent" />,
+                      active: chatOpen,
+                      onSelect: () => {
+                        setChatOpen(!chatOpen);
+                        setPanelOpen(false);
+                      },
+                    },
+                  ]
+                : []),
+              { label: "Pratinjau", icon: <Eye className="size-4" />, onSelect: openPreview },
+            ]}
           />
           <button
             type="button"
@@ -564,6 +746,24 @@ export function PageEditor({
           </button>
         </div>
       </header>
+
+      {conflict && (
+        <ConflictBanner
+          conflict={conflict.info}
+          mode={conflict.mode}
+          busy={busy}
+          onReload={reloadLatest}
+          onOverwrite={overwrite}
+          onDismiss={() => {
+            // Treat their save as seen; a real clash still shows the conflict banner on the next save.
+            dismissedVersion.current = conflict.info.version;
+            setConflict(null);
+          }}
+        />
+      )}
+      {approval && !isHome && (
+        <ApprovalBanner approval={approval} canApprove={permissions.approve} busy={busy} onApprove={approve} onRequestChanges={askForChanges} />
+      )}
 
       {autoNote && (
         <div className="flex items-center justify-center gap-2 border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300">
@@ -695,6 +895,8 @@ export function PageEditor({
           onRestore={restore}
           onFlush={() => save()}
           isAdmin={isAdmin}
+          staff={permissions.staff}
+          canTemplates={permissions.templates}
           onClose={() => setPanelOpen(false)}
         />
       )}

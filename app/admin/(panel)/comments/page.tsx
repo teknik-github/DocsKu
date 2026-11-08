@@ -1,7 +1,7 @@
 import { Fragment, Suspense } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
-import { requireUser } from "@/lib/auth/dal";
+import { requirePermission } from "@/lib/auth/dal";
 import { COMMENTS_PER_PAGE, COMMENT_VIEWS, listCommentRows, listCommentablePages, type CommentView } from "@/lib/comments";
 import { getCommentSettings, getSiteSettings } from "@/lib/data/site";
 import { isAiReady } from "@/lib/ai/config";
@@ -25,7 +25,7 @@ export default function CommentsPage({ searchParams }: PageProps<"/admin/comment
 }
 
 async function Comments({ searchParams }: Pick<PageProps<"/admin/comments">, "searchParams">) {
-  const user = await requireUser();
+  const user = await requirePermission("comments.moderate");
   const params = await searchParams;
   // Old ?status= links still work.
   const wanted = params.view ?? params.status;

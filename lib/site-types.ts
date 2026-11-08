@@ -18,6 +18,8 @@ export type SiteSettings = {
   colorTheme?: string;
   /** Author byline, author box and /penulis pages (default on). Set in Tema → Penulis. */
   showAuthors?: boolean;
+  /** "Unduh PDF" buttons and /pdf/… downloads (default on). Set in Tema → PDF. */
+  pdfDownloads?: boolean;
   name: string;
   description: string;
   headerCta: { title: string; href: string } | null;
@@ -67,7 +69,8 @@ export type NavigationData = { tabs: NavTabData[] };
 export type NavLink = { title: string; href: string };
 export type NavGroup = { title: string; items: NavItem[] };
 export type NavItem = NavLink | NavGroup;
-export type NavSection = { title: string; image?: string; items: NavItem[] };
+/** `id` is the stored section id (a category), e.g. for /pdf/kategori/<id>. */
+export type NavSection = { id?: string; title: string; image?: string; items: NavItem[] };
 export type NavTab = { title: string; href: string; sections: NavSection[] };
 
 export type SearchHeading = { id: string; text: string; level: 2 | 3 };

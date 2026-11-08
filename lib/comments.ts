@@ -52,7 +52,7 @@ export async function addComment(input: {
   body: string;
   status: CommentStatus;
   staff: boolean;
-}): Promise<{ status: CommentStatus } | { error: "page" | "parent" }> {
+}): Promise<{ status: CommentStatus; id: string; pageId: string } | { error: "page" | "parent" }> {
   const pageId = await publishedPageId(input.slug);
   if (!pageId) return { error: "page" };
   const c = schema.pageComments;
@@ -64,17 +64,20 @@ export async function addComment(input: {
     if (!parent) return { error: "parent" };
   }
   const { status } = input;
-  await db.insert(c).values({
-    pageId,
-    parentId: input.parentId ?? null,
-    authorName: input.name,
-    authorEmail: input.email || null,
-    body: input.body,
-    status,
-    isStaff: input.staff,
-    approvedAt: status === "approved" ? sql`now()` : null,
-  });
-  return { status };
+  const [row] = await db
+    .insert(c)
+    .values({
+      pageId,
+      parentId: input.parentId ?? null,
+      authorName: input.name,
+      authorEmail: input.email || null,
+      body: input.body,
+      status,
+      isStaff: input.staff,
+      approvedAt: status === "approved" ? sql`now()` : null,
+    })
+    .returning({ id: c.id });
+  return { status, id: row.id, pageId };
 }
 
 /** A new top-level comment written from the dashboard on a published doc page. */

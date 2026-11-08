@@ -5,6 +5,7 @@ import { SearchField } from "@/components/search";
 import { PageCardView } from "@/components/publication/cards";
 import { GhostGrid, type GhostItem } from "@/components/publication/ghost-grid";
 import { T } from "@/components/locale-text";
+import { CategoryPdfLink } from "@/components/pdf-button";
 
 /** Hybrid layout: the docs hub as card grids, one per section. */
 export function HybridHub({ tabs, cards }: { tabs: NavTab[]; cards: Map<string, PageCard> }) {
@@ -37,7 +38,10 @@ export function HybridHub({ tabs, cards }: { tabs: NavTab[]; cards: Map<string, 
             if (items.length === 0) return null;
             return (
               <div key={section.title} className="mt-10">
-                <h3 className="mb-5 text-sm font-semibold tracking-wide text-fg-muted uppercase">{section.title}</h3>
+                <div className="mb-5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                  <h3 className="text-sm font-semibold tracking-wide text-fg-muted uppercase">{section.title}</h3>
+                  <CategoryPdfLink sectionId={section.id} />
+                </div>
                 <div className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
                   {items.map((card) => (
                     <PageCardView key={card.href} card={card} tag={section.title} />

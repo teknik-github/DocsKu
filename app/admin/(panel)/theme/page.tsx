@@ -6,6 +6,7 @@ import { ColorThemePicker, ThemePicker } from "@/components/admin/theme-picker";
 import { colorThemeOf } from "@/lib/color-themes";
 import { PageHeader } from "@/components/admin/ui";
 import { ShowAuthorsToggle } from "@/components/admin/show-authors-toggle";
+import { PdfToggle } from "@/components/admin/pdf-toggle";
 
 export const metadata = { title: "Tema" };
 
@@ -39,6 +40,11 @@ async function Theme() {
         <h2 className="mb-1 text-sm font-semibold text-fg">Penulis</h2>
         <p className="mb-4 text-sm text-fg-muted">Siapa yang menulis tiap artikel, di semua tata letak.</p>
         <ShowAuthorsToggle initial={site?.showAuthors !== false} />
+      </section>
+      <section id="pdf" className="scroll-mt-20">
+        <h2 className="mb-1 text-sm font-semibold text-fg">PDF</h2>
+        <p className="mb-4 text-sm text-fg-muted">Pembaca bisa mengunduh artikel atau satu kategori sebagai berkas PDF.</p>
+        <PdfToggle initial={site?.pdfDownloads !== false} />
       </section>
     </div>
   );

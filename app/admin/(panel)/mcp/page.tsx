@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { desc, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth/dal";
+import { can } from "@/lib/auth/permissions";
 import { readMcpServers, toServerView } from "@/lib/mcp/external";
 import { McpTokens } from "@/components/admin/mcp-tokens";
 import { McpServers } from "@/components/admin/mcp-servers";
@@ -50,6 +51,7 @@ async function Mcp() {
     <div className="space-y-10">
       <McpTokens
         endpoint={`${origin}/api/mcp`}
+        canPublish={can(user, "pages.publish")}
         tokens={tokens.map((token) => ({
           ...token,
           expiresAt: token.expiresAt?.toISOString() ?? null,

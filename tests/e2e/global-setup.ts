@@ -64,6 +64,8 @@ export default async function globalSetup() {
     DEV_ORIGINS: "",
     DISABLE_AUTO_MIGRATE: "",
     DISABLE_SCHEDULER: "",
+    // Lets custom webhooks reach the spec's local receiver (off in real deployments).
+    WEBHOOK_ALLOW_PRIVATE: "1",
   };
 
   const next = path.join(ROOT, "node_modules/.bin/next");

@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { ArrowDownRight, ArrowUpRight, ExternalLink, Eye, MessageSquareText, PenLine, Search, Sparkles, ThumbsDown, ThumbsUp, type LucideIcon } from "lucide-react";
-import { requireUser } from "@/lib/auth/dal";
+import { requirePermission } from "@/lib/auth/dal";
 import {
   FEEDBACK_FILTERS,
   RANGES,
@@ -37,7 +37,7 @@ export default function StatsPage({ searchParams }: PageProps<"/admin/stats">) {
 }
 
 async function Stats({ searchParams }: Pick<PageProps<"/admin/stats">, "searchParams">) {
-  await requireUser();
+  await requirePermission("stats.view");
   const params = await searchParams;
   const range: Range = RANGES.find((r) => String(r) === params.range) ?? 30;
   const filter: FeedbackFilter = FEEDBACK_FILTERS.find((f) => f === params.feedback) ?? "open";

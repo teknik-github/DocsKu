@@ -4,7 +4,10 @@ import { db, schema } from "@/db";
 import { addToNavigation, readAutomation } from "@/lib/automation";
 import { authorizedInternal } from "@/lib/internal-auth";
 import { forgetRedirects } from "@/lib/redirects";
+import { forgetRouteExistence } from "@/lib/route-exists";
 import { logActivity, pruneActivity } from "@/lib/activity";
+import { notify } from "@/lib/notify";
+import { runNotifications } from "@/lib/notifications/deliver";
 
 /**
  * Publishes scheduled pages whose time has come. Called every minute by
@@ -36,6 +39,7 @@ export async function POST(request: Request) {
         coverImage: schema.pages.coverImage,
         kind: schema.pages.kind,
         navSection: schema.pages.navSection,
+        slug: schema.pages.slug,
       });
     if (due.length) {
       await tx.insert(schema.pageRevisions).values(
@@ -63,6 +67,8 @@ export async function POST(request: Request) {
 
   for (const page of published) {
     await logActivity({ user: null, action: "page.publish", target: { type: "page", id: page.id, label: page.kind === "home" ? "Beranda" : page.title }, meta: { scheduled: true } });
+    // A scheduled page going live is a first publish (published pages can't be scheduled).
+    if (page.kind === "doc") await notify({ type: "page.published", pageId: page.id, title: page.title, href: `/docs/${page.slug}`, by: "Jadwal terbit" });
   }
   await pruneActivity();
 
@@ -70,7 +76,10 @@ export async function POST(request: Request) {
   if (published.length) {
     revalidateTag("pages", { expire: 0 });
     forgetRedirects();
+    forgetRouteExistence();
   }
   if (navigationChanged) revalidateTag("navigation", { expire: 0 });
-  return Response.json({ published: published.length });
+  // Emails and webhooks queued by notify() go out here, within a time budget.
+  const notifications = await runNotifications();
+  return Response.json({ published: published.length, notifications });
 }

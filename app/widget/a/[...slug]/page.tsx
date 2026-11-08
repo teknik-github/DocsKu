@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
-import { getPublishedPage, getPublishedSlugs, getWidgetSettings } from "@/lib/data/site";
+import { getPublishedPage, getPublishedSlugs } from "@/lib/data/site";
 import { RenderDoc } from "@/lib/content/render";
 import { slugToHref } from "@/lib/navigation";
 import { WidgetBack, WidgetView } from "@/components/widget/article-tools";
@@ -21,10 +21,10 @@ export async function generateStaticParams() {
 
 /** A published article read inside the help widget, with a link to the full page. */
 export default async function WidgetArticlePage({ params }: PageProps<"/widget/a/[...slug]">) {
-  // Checked before anything streams, so a missing page (or the widget switched off) is a real HTTP 404.
+  // Checked before anything streams, so a missing page is a real HTTP 404 (proxy.ts also 404s while the widget is off).
   const { slug } = await params;
-  const [widget, page] = await Promise.all([getWidgetSettings(), getPublishedPage(slug.join("/"))]);
-  if (!widget.enabled || !page) notFound();
+  const page = await getPublishedPage(slug.join("/"));
+  if (!page) notFound();
   return (
     <Suspense
       fallback={

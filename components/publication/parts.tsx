@@ -5,6 +5,7 @@ import { categoryIcon } from "@/lib/category-icon";
 import { locate, sectionPages } from "@/lib/navigation";
 import type { NavLink, NavTab, PageCard } from "@/lib/site-types";
 import { HubLink, T } from "@/components/locale-text";
+import { fixedImage } from "@/lib/responsive-image";
 
 /** Pieces shared by the layouts in components/publication/. */
 
@@ -34,7 +35,7 @@ export function CategoryBadge({ title, image, size = "md" }: { title: string; im
   const icon = size === "lg" ? "size-6" : size === "sm" ? "size-3.5" : "size-5";
   if (image) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={image} alt="" className={`${box} shrink-0 border border-line bg-surface object-contain`} />;
+    return <img {...fixedImage(image, size === "lg" ? 48 : size === "sm" ? 28 : 40)} alt="" loading="lazy" decoding="async" className={`${box} shrink-0 border border-line bg-surface object-contain`} />;
   }
   return (
     <span className={`${box} flex shrink-0 items-center justify-center bg-accent-soft text-accent`}>
@@ -93,6 +94,8 @@ export type BookEntry = {
   /** Chapter (section) number, counted across the whole book. */
   chapter: number;
   chapterTitle: string;
+  /** The chapter's navigation section id (a category), e.g. for its PDF. */
+  sectionId?: string;
   /** Position within the chapter, 1-based: "3.2" is chapter 3, page 2. */
   index: number;
 };
@@ -107,7 +110,7 @@ export function bookOutline(tabs: NavTab[]): BookEntry[] {
       if (!pages.length) continue;
       chapter += 1;
       pages.forEach((page, i) =>
-        entries.push({ href: page.href, title: page.title, part: t + 1, partTitle: tab.title, chapter, chapterTitle: section.title, index: i + 1 }),
+        entries.push({ href: page.href, title: page.title, part: t + 1, partTitle: tab.title, chapter, chapterTitle: section.title, sectionId: section.id, index: i + 1 }),
       );
     }
   });

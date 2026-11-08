@@ -10,6 +10,7 @@ import { type BookEntry, bookOutline, roman } from "@/components/publication/par
 import { PageTurnKeys, ReadingProgress } from "@/components/publication/reading-progress";
 import { HubLink, T } from "@/components/locale-text";
 import { AuthorByline } from "@/components/author";
+import { CategoryPdfLink } from "@/components/pdf-button";
 
 /** "Buku": the docs read like a book, in numbered parts and chapters. */
 
@@ -17,12 +18,12 @@ const number = (e: BookEntry) => `${e.chapter}.${e.index}`;
 
 /** Groups the outline into parts → chapters → pages, keeping order. */
 function partsOf(outline: BookEntry[]) {
-  const parts: { part: number; title: string; chapters: { chapter: number; title: string; pages: BookEntry[] }[] }[] = [];
+  const parts: { part: number; title: string; chapters: { chapter: number; title: string; sectionId?: string; pages: BookEntry[] }[] }[] = [];
   for (const entry of outline) {
     let part = parts.at(-1);
     if (!part || part.part !== entry.part) parts.push((part = { part: entry.part, title: entry.partTitle, chapters: [] }));
     let chapter = part.chapters.at(-1);
-    if (!chapter || chapter.chapter !== entry.chapter) part.chapters.push((chapter = { chapter: entry.chapter, title: entry.chapterTitle, pages: [] }));
+    if (!chapter || chapter.chapter !== entry.chapter) part.chapters.push((chapter = { chapter: entry.chapter, title: entry.chapterTitle, sectionId: entry.sectionId, pages: [] }));
     chapter.pages.push(entry);
   }
   return parts;
@@ -84,6 +85,7 @@ export function BookHub({ site, tabs }: { site: SiteSettings; tabs: NavTab[] }) 
                       <T k="chapter" vars={{ n: chapter.chapter }} />
                     </span>
                     <span className="font-serif text-xl text-fg">{chapter.title}</span>
+                    <CategoryPdfLink sectionId={chapter.sectionId} className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-fg-subtle hover:text-accent" />
                   </p>
                   <ol className="mt-2 ml-0 sm:ml-[4.25rem]">
                     {chapter.pages.map((page) => (

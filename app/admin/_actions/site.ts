@@ -3,12 +3,14 @@
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { updateTag } from "next/cache";
-import { eq } from "drizzle-orm";
+import { forgetRouteExistence } from "@/lib/route-exists";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { can } from "@/lib/auth/permissions";
 import { logActivity } from "@/lib/activity";
-import { STORED_NAME, uploadPath } from "@/lib/media";
+import { STORED_NAME, uploadPath, removeVariants } from "@/lib/media";
 import { isCoverColor } from "@/lib/cover-palette";
 import { COLOR_THEME_IDS } from "@/lib/color-themes";
 import { isCategoryImage } from "@/lib/categories";
@@ -73,6 +75,7 @@ export async function saveSiteSettings(input: SiteSettings): Promise<Result> {
     layout: stored.layout ?? "docs",
     ...(stored.colorTheme ? { colorTheme: stored.colorTheme } : {}),
     ...(stored.showAuthors !== undefined ? { showAuthors: stored.showAuthors } : {}),
+    ...(stored.pdfDownloads !== undefined ? { pdfDownloads: stored.pdfDownloads } : {}),
   });
   await logActivity({ user, action: "settings.save", target: { type: "settings", id: "umum", label: "Umum" } });
   return { ok: true };
@@ -106,7 +109,18 @@ export async function saveShowAuthors(show: boolean): Promise<Result> {
   if (typeof show !== "boolean") return { ok: false, error: "Pilihan tidak valid." };
   await writeSite({ ...(await readSite()), showAuthors: show });
   updateTag("authors");
+  forgetRouteExistence();
   await logActivity({ user, action: "theme.authors", target: { type: "theme", id: "authors", label: show ? "tampil" : "disembunyikan" }, meta: { show } });
+  return { ok: true };
+}
+
+/** Tema → PDF: the "Unduh PDF" buttons and the /pdf/… downloads. */
+export async function savePdfDownloads(enabled: boolean): Promise<Result> {
+  const user = await authorize("admin");
+  if ("error" in user) return { ok: false, error: user.error };
+  if (typeof enabled !== "boolean") return { ok: false, error: "Pilihan tidak valid." };
+  await writeSite({ ...(await readSite()), pdfDownloads: enabled });
+  await logActivity({ user, action: "theme.pdf", target: { type: "theme", id: "pdf", label: enabled ? "aktif" : "nonaktif" }, meta: { enabled } });
   return { ok: true };
 }
 
@@ -206,14 +220,20 @@ export async function saveNavigation(input: NavigationData): Promise<Result> {
 
 /** Removes an uploaded image. Pages that still use it will show a broken image. */
 export async function deleteMedia(id: string): Promise<Result> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (!z.uuid().safeParse(id).success) return { ok: false, error: "Media tidak ditemukan." };
-  const [row] = await db.delete(schema.media).where(eq(schema.media.id, id)).returning({ filename: schema.media.filename, originalName: schema.media.originalName });
+  // Contributors may only delete files they uploaded themselves.
+  const mine = can(user, "pages.editAny") ? undefined : eq(schema.media.uploadedById, user.id);
+  const [row] = await db
+    .delete(schema.media)
+    .where(mine ? and(eq(schema.media.id, id), mine) : eq(schema.media.id, id))
+    .returning({ filename: schema.media.filename, originalName: schema.media.originalName });
   if (!row) return { ok: false, error: "Media tidak ditemukan." };
   await logActivity({ user, action: "media.delete", target: { type: "media", id, label: row.originalName }, meta: { file: row.filename } });
   if (STORED_NAME.test(row.filename)) {
     await unlink(uploadPath(row.filename)).catch(() => {});
+    await removeVariants(row.filename);
   }
   return { ok: true };
 }

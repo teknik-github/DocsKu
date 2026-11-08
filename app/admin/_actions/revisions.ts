@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { JSONContent } from "@tiptap/core";
 import { db, schema } from "@/db";
 import { authorize } from "@/lib/auth/dal";
+import { canEditPage, NO_PAGE_ACCESS } from "@/lib/auth/page-access";
 import { toMarkdown } from "@/lib/content/markdown";
 import { diffField, diffText, type DiffBlock, type FieldDiff } from "@/lib/revision-diff";
 import type { PageSeo } from "@/lib/site-types";
@@ -41,9 +42,10 @@ const fieldsOf = (a: Snapshot, b: Snapshot): FieldDiff[] =>
 
 /** Compares a revision with the working copy, the live version, or the previous revision. */
 export async function compareRevision(pageId: string, revisionId: string, against: CompareAgainst): Promise<CompareResult> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (!z.uuid().safeParse(pageId).success || !z.uuid().safeParse(revisionId).success) return { ok: false, error: "Revisi tidak ditemukan." };
+  if (!(await canEditPage(user, pageId))) return { ok: false, error: NO_PAGE_ACCESS };
   const r = schema.pageRevisions;
   const [revision] = await db
     .select()

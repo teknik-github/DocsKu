@@ -1,6 +1,7 @@
 "use server";
 
 import { updateTag } from "next/cache";
+import { forgetRouteExistence } from "@/lib/route-exists";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
@@ -37,7 +38,10 @@ export async function setPagesVisibility(ids: string[], visibility: "public" | "
   await syncTranslationVisibility(changed.map((page) => page.id), parsed.data.visibility);
 
   // Navigation, search, cards and the Tanya AI corpus are all cached under "pages".
-  if (changed.some((page) => page.status === "published")) updateTag("pages");
+  if (changed.some((page) => page.status === "published")) {
+    updateTag("pages");
+    forgetRouteExistence();
+  }
   await Promise.all(
     changed.map((page) =>
       logActivity({

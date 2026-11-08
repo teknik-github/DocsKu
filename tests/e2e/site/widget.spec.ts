@@ -21,9 +21,9 @@ test.describe("help widget", () => {
     await section.getByRole("button", { name: "Simpan" }).click();
     await expect.poll(async () => (await db`select value from settings where key = 'widget'`)[0]?.value?.enabled).toBe(true);
 
-    // The prerendered "off" page can be served once more while it regenerates (see the report's open issues).
-    await expect.poll(async () => (await request.get("/widget")).status(), { timeout: 30_000 }).toBe(200);
+    // proxy.ts decides on/off per request, so the very first request after saving is already a 200.
     const res = await request.get("/widget");
+    expect(res.status()).toBe(200);
     const csp = res.headers()["content-security-policy"];
     expect(csp).toContain("frame-ancestors");
     expect(csp).toContain("https://bantuan.contoh.test");

@@ -1,6 +1,9 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { attachFeedbackComment, readPublicJson, recordFeedback } from "@/lib/reader";
+import { sql } from "drizzle-orm";
+import { db } from "@/db";
+import { notify } from "@/lib/notify";
 
 /**
  * "Was this page helpful?" from the docs site. A vote returns an id; the
@@ -21,5 +24,10 @@ export async function POST(request: Request) {
     return id ? Response.json({ id }) : new Response(null, { status: 404 });
   }
   const saved = await attachFeedbackComment(body.data.id, body.data.comment);
+  if (saved) {
+    const [row] = await db.execute<{ page_id: string; title: string; slug: string; helpful: boolean }>(sql`
+      select p.id as page_id, p.title, p.slug, f.helpful from page_feedback f join pages p on p.id = f.page_id where f.id = ${body.data.id}`);
+    if (row) await notify({ type: "feedback.new", pageId: row.page_id, pageTitle: row.title, href: `/docs/${row.slug}`, helpful: row.helpful, message: body.data.comment });
+  }
   return new Response(null, { status: saved ? 204 : 404 });
 }

@@ -16,7 +16,7 @@ const owned = (id: string, userId: string) =>
 
 /** The signed-in user's chats, newest first; only one page's chats when `pageId` is given. */
 export async function listConversations(pageId?: string | null): Promise<ConversationListItem[]> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return [];
   const filters = [eq(schema.aiConversations.userId, user.id)];
   if (pageId) {
@@ -41,13 +41,13 @@ export async function listConversations(pageId?: string | null): Promise<Convers
 }
 
 export async function getConversation(id: string): Promise<Conversation | null> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user || !isId(id)) return null;
   return getOwnedConversation(id, user.id);
 }
 
 export async function renameConversation(id: string, title: string) {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user || !isId(id)) return { ok: false as const };
   const clean = title.replace(/\s+/g, " ").trim().slice(0, 120);
   if (!clean) return { ok: false as const };
@@ -56,14 +56,14 @@ export async function renameConversation(id: string, title: string) {
 }
 
 export async function deleteConversation(id: string) {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user || !isId(id)) return { ok: false as const };
   await db.delete(schema.aiConversations).where(owned(id, user.id));
   return { ok: true as const };
 }
 
 export async function setConversationModel(id: string, model: string | null) {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user || !isId(id)) return { ok: false as const };
   if (model !== null && !MODEL_PATTERN.test(model)) return { ok: false as const };
   await db.update(schema.aiConversations).set({ model }).where(owned(id, user.id));
@@ -77,7 +77,7 @@ export async function updateProposal(
   proposalId: string,
   patch: Pick<ProposalState, "status" | "draftId" | "pageStatus" | "error">,
 ) {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user || !isId(conversationId)) return { ok: false as const };
   const conversation = await getOwnedConversation(conversationId, user.id);
   if (!conversation) return { ok: false as const };
@@ -102,7 +102,7 @@ export async function updateProposal(
 
 /** Summarises the older part of a chat now, instead of waiting for it to grow. */
 export async function compactConversation(id: string) {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user || !isId(id)) return { ok: false as const, error: "Percakapan tidak ditemukan." };
   const conversation = await getOwnedConversation(id, user.id);
   if (!conversation) return { ok: false as const, error: "Percakapan tidak ditemukan." };
@@ -119,7 +119,7 @@ export async function compactConversation(id: string) {
 
 /** Models for the chat's model picker: detected from the provider, else the preset list. */
 export async function listChatModels(): Promise<{ models: string[]; defaultModel: string }> {
-  const user = await authorize();
+  const user = await authorize("any");
   const config = await getAiConfig();
   const fallback = [...new Set([config.model, ...AI_PRESETS[config.provider].models].filter(Boolean))];
   if ("error" in user) return { models: fallback, defaultModel: config.model };
@@ -136,7 +136,7 @@ export async function listChatModels(): Promise<{ models: string[]; defaultModel
  * be sent again. Messages already folded into the summary can't be changed.
  */
 export async function truncateConversation(id: string, fromMessageId: string) {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user || !isId(id)) return { ok: false as const, error: "Percakapan tidak ditemukan." };
   const conversation = await getOwnedConversation(id, user.id);
   if (!conversation) return { ok: false as const, error: "Percakapan tidak ditemukan." };

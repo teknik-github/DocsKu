@@ -33,9 +33,10 @@ import { ThemeToggle } from "@/components/theme";
 import type { SessionUser } from "@/lib/auth/dal";
 import { SIDEBAR_COOKIE } from "@/lib/sidebar-cookie";
 import { Avatar } from "@/components/avatar";
+import { can, ROLE_LABELS, type Permission } from "@/lib/auth/permissions";
 
 
-export type NavCounts = { comments: number; feedback: number; drafts: number; review: number };
+export type NavCounts = { comments: number; feedback: number; drafts: number; review: number; approvals: number; changes: number };
 
 type Item = {
   href: string;
@@ -45,6 +46,8 @@ type Item = {
   /** Other paths that belong to this item (e.g. MCP lives under Pengaturan). */
   also?: string[];
   badge?: (counts: NavCounts) => { value: number; hint: string; quiet?: boolean } | null;
+  /** Hidden without this permission (lib/auth/permissions.ts); the page itself checks again. */
+  need?: Permission;
 };
 type Group = { title?: string; adminOnly?: boolean; items: Item[] };
 
@@ -53,18 +56,26 @@ const GROUPS: Group[] = [
   {
     title: "Konten",
     items: [
-      { href: "/admin/home", label: "Beranda", icon: House },
+      { href: "/admin/home", label: "Beranda", icon: House, need: "home.edit" },
       {
         href: "/admin/pages",
         label: "Halaman",
         icon: FileText,
         also: ["/admin/templates"],
-        badge: (c) => (c.drafts ? { value: c.drafts, hint: `${c.drafts} draf atau perubahan belum terbit`, quiet: true } : null),
+        badge: (c) =>
+          c.approvals
+            ? { value: c.approvals, hint: `${c.approvals} halaman menunggu persetujuan` }
+            : c.changes
+              ? { value: c.changes, hint: `${c.changes} halaman Anda diminta diperbaiki` }
+              : c.drafts
+              ? { value: c.drafts, hint: `${c.drafts} draf atau perubahan belum terbit`, quiet: true }
+              : null,
       },
       {
         href: "/admin/review",
         label: "Tinjauan",
         icon: CalendarCheck,
+        need: "review.manage",
         badge: (c) => (c.review ? { value: c.review, hint: `${c.review} halaman perlu ditinjau`, quiet: true } : null),
       },
       { href: "/admin/media", label: "Media", icon: ImageIcon },
@@ -78,12 +89,14 @@ const GROUPS: Group[] = [
         href: "/admin/stats",
         label: "Statistik",
         icon: ChartColumn,
+        need: "stats.view",
         badge: (c) => (c.feedback ? { value: c.feedback, hint: `${c.feedback} pesan pembaca belum ditangani` } : null),
       },
       {
         href: "/admin/comments",
         label: "Komentar",
         icon: MessageSquare,
+        need: "comments.moderate",
         badge: (c) => (c.comments ? { value: c.comments, hint: `${c.comments} komentar menunggu persetujuan` } : null),
       },
     ],
@@ -102,7 +115,6 @@ const GROUPS: Group[] = [
   },
 ];
 
-const ROLE_LABEL = { admin: "Admin", editor: "Editor" };
 
 function isActive(item: Item, pathname: string) {
   if (item.exact) return pathname === item.href;
@@ -125,7 +137,9 @@ function SidebarContent({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const groups = GROUPS.filter((group) => !group.adminOnly || user.role === "admin");
+  const groups = GROUPS.filter((group) => !group.adminOnly || user.role === "admin")
+    .map((group) => ({ ...group, items: group.items.filter((item) => !item.need || can(user, item.need)) }))
+    .filter((group) => group.items.length > 0);
 
   return (
     <>
@@ -229,7 +243,7 @@ function SidebarContent({
             <Link
               href="/admin/profile"
               onClick={onNavigate}
-              title={`${user.name} · ${ROLE_LABEL[user.role]}`}
+              title={`${user.name} · ${ROLE_LABELS[user.role]}`}
               className="flex h-9 items-center justify-center rounded-lg text-fg-muted hover:bg-fill/70 hover:text-fg"
             >
               <Avatar name={user.name} src={user.avatar} size={28} />
@@ -249,7 +263,7 @@ function SidebarContent({
               <Avatar name={user.name} src={user.avatar} size={32} className="ring-line group-hover:ring-2" />
               <span className="min-w-0">
                 <span className="block truncate text-sm text-fg">{user.name}</span>
-                <span className="block text-xs text-fg-subtle">{ROLE_LABEL[user.role]}</span>
+                <span className="block text-xs text-fg-subtle">{ROLE_LABELS[user.role]}</span>
               </span>
             </Link>
             <ThemeToggle />

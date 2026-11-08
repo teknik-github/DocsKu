@@ -9,6 +9,7 @@ import { dateLocale, type I18nKey, t } from "@/lib/i18n";
 import { allPages, sectionPages } from "@/lib/navigation";
 import { categoryIcon } from "@/lib/category-icon";
 import { formatDate } from "@/lib/format";
+import { fixedImage, responsiveImage } from "@/lib/responsive-image";
 import { mdxToDoc } from "@/lib/content/mdx-to-doc";
 import { RenderDoc } from "@/lib/content/render";
 import { type HomeButton, type HomeSection, type NavLink, type NavTab, type PageCard, type SiteSettings, siteForLocale } from "@/lib/site-types";
@@ -208,9 +209,11 @@ function Paragraphs({ text, className = "" }: { text: string; className?: string
   );
 }
 
-function Picture({ src, className }: { src: string; className: string }) {
-  // eslint-disable-next-line @next/next/no-img-element -- uploads are served as-is from /media
-  return <img src={src} alt="" className={className} />;
+/** An uploaded or external image; uploads get resized WebP variants (lib/responsive-image.ts). `fixed` = a small icon of that many px. */
+function Picture({ src, className, sizes = "100vw", fixed }: { src: string; className: string; sizes?: string; fixed?: number }) {
+  const image = fixed ? fixedImage(src, fixed) : responsiveImage(src, { sizes });
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img {...image} alt="" loading="lazy" decoding="async" className={className} />;
 }
 
 function popularOf(data: Data) {
@@ -234,7 +237,7 @@ function Hero({ s, data }: { s: Of<"hero">; data: Data }) {
       style={{
         background: photo ? undefined : background,
         // A darkened photo keeps the white text readable on any image.
-        backgroundImage: photo ? `linear-gradient(rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.45)), url(${JSON.stringify(photo)})` : undefined,
+        backgroundImage: photo ? `linear-gradient(rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.45)), url(${JSON.stringify(responsiveImage(photo, { sizes: "100vw" }).src)})` : undefined,
       }}
     >
       <div className={`mx-auto px-5 py-16 sm:px-8 lg:py-24 ${center ? "max-w-3xl text-center" : "max-w-6xl"}`}>
@@ -274,7 +277,7 @@ function CategoryCard({ title, image, links, max, tx }: { title: string; image?:
     <article className="flex flex-col rounded-2xl border border-line bg-surface p-6 transition-colors hover:border-line-strong">
       <div className="flex items-start gap-4">
         {image ? (
-          <Picture src={image} className="size-11 shrink-0 rounded-xl border border-line bg-surface object-contain" />
+          <Picture src={image} fixed={44} className="size-11 shrink-0 rounded-xl border border-line bg-surface object-contain" />
         ) : (
           <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
             <Icon name={categoryIcon(title)} className="size-5" />
@@ -427,7 +430,7 @@ function Features({ s }: { s: Of<"features"> }) {
           const inner = (
             <>
               {item.image ? (
-                <Picture src={item.image} className="mb-4 aspect-[16/9] w-full rounded-xl border border-line bg-fill object-cover" />
+                <Picture src={item.image} sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw" className="mb-4 aspect-[16/9] w-full rounded-xl border border-line bg-fill object-cover" />
               ) : (
                 <span className="mb-4 flex size-11 items-center justify-center rounded-xl bg-accent-soft text-accent">
                   <Icon name={item.icon} className="size-5" />
@@ -466,9 +469,9 @@ function TextImage({ s }: { s: Of<"textImage"> }) {
   if (!s.image) return text;
   return (
     <div className="grid items-center gap-10 md:grid-cols-2">
-      {s.imageSide === "left" && <Picture src={s.image} className="w-full rounded-2xl border border-line object-cover" />}
+      {s.imageSide === "left" && <Picture src={s.image} sizes="(min-width: 1024px) 50vw, 100vw" className="w-full rounded-2xl border border-line object-cover" />}
       {text}
-      {s.imageSide === "right" && <Picture src={s.image} className="w-full rounded-2xl border border-line object-cover" />}
+      {s.imageSide === "right" && <Picture src={s.image} sizes="(min-width: 1024px) 50vw, 100vw" className="w-full rounded-2xl border border-line object-cover" />}
     </div>
   );
 }

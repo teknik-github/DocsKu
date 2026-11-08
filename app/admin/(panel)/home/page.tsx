@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { requireUser } from "@/lib/auth/dal";
+import { requirePermission } from "@/lib/auth/dal";
 import { readSettingForAdmin } from "@/lib/data/admin";
 import { getNavigation } from "@/lib/data/site";
 import { allPages } from "@/lib/navigation";
@@ -22,7 +22,7 @@ export default function HomePage({ searchParams }: PageProps<"/admin/home">) {
 }
 
 async function Builder({ searchParams }: Pick<PageProps<"/admin/home">, "searchParams">) {
-  await requireUser();
+  await requirePermission("home.edit");
   const [{ bahasa }, languages] = await Promise.all([searchParams, readLanguages()]);
   // ?bahasa=<code>: the home of an extra language (/<code>), when that language is enabled.
   const locale = typeof bahasa === "string" && languages.languages.some((l) => l.code === bahasa) ? bahasa : undefined;

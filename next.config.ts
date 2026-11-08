@@ -33,6 +33,8 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   // Self-contained server in .next/standalone for the Docker image (see Dockerfile).
   output: process.env.NEXT_DIST_DIR ? undefined : "standalone",
+  // The PDF fonts are read from disk at runtime (lib/pdf/fonts.ts), so tracing can't see them.
+  outputFileTracingIncludes: { "/pdf/*": ["./assets/fonts/pdf/**/*"] },
   cacheComponents: true,
   partialPrefetching: true,
   reactCompiler: true,

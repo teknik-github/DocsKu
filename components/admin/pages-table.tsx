@@ -11,6 +11,7 @@ import type { CategoryGroup } from "@/lib/categories";
 import { formatDateTime } from "@/components/admin/format";
 import { Button, Panel, StatusBadge } from "@/components/admin/ui";
 import { confirmDialog } from "@/components/admin/dialog";
+import { Avatar } from "@/components/avatar";
 
 type Row = {
   id: string;
@@ -31,6 +32,10 @@ type Row = {
   locale?: string | null;
   /** On an original: its translations, shown as language badges. */
   translations?: { id: string; locale: string; status: "draft" | "scheduled" | "published"; outdated?: boolean }[];
+  /** Approval workflow: "pending" (submitted) or "changes_requested". */
+  approvalStatus?: string | null;
+  /** People with the page open in the editor right now. */
+  editing?: { name: string; avatar: string | null }[];
 };
 
 const NO_CATEGORY = "__none";
@@ -39,10 +44,13 @@ export function PagesTable({
   pages,
   showCategory = false,
   moveTargets,
+  staff = true,
   empty = "Tidak ada halaman yang cocok.",
 }: {
   pages: Row[];
   showCategory?: boolean;
+  /** Admins and editors; contributors don't get the visibility actions. */
+  staff?: boolean;
   /** Categories to move selected pages to (admins only). */
   moveTargets?: CategoryGroup[];
   empty?: React.ReactNode;
@@ -140,13 +148,13 @@ export function PagesTable({
                 </select>
               </label>
             )}
-            {[...selected].some((id) => pages.find((p) => p.id === id)?.visibility !== "internal") && (
+            {staff && [...selected].some((id) => pages.find((p) => p.id === id)?.visibility !== "internal") && (
               <Button variant="secondary" size="sm" onClick={() => setVisibility("internal")} disabled={pending} title="Hanya tim yang masuk yang bisa membaca">
                 <Lock className="size-3.5" />
                 Jadikan internal
               </Button>
             )}
-            {[...selected].some((id) => pages.find((p) => p.id === id)?.visibility === "internal") && (
+            {staff && [...selected].some((id) => pages.find((p) => p.id === id)?.visibility === "internal") && (
               <Button variant="secondary" size="sm" onClick={() => setVisibility("public")} disabled={pending}>
                 <Globe className="size-3.5" />
                 Jadikan publik
@@ -237,7 +245,26 @@ export function PagesTable({
                   </td>
                 )}
                 <td className="py-3 pr-4 whitespace-nowrap">
-                  <StatusBadge status={page.status} />
+                  <span className="inline-flex items-center gap-1.5">
+                    <StatusBadge status={page.status} />
+                    {page.editing && page.editing.length > 0 && (
+                      <span
+                        data-testid="row-presence"
+                        title={`Sedang diedit: ${page.editing.map((p) => p.name).join(", ")}`}
+                        className="inline-flex -space-x-1"
+                      >
+                        {page.editing.slice(0, 3).map((p) => (
+                          <Avatar key={p.name} name={p.name} src={p.avatar} size={18} className="ring-2 ring-surface" />
+                        ))}
+                      </span>
+                    )}
+                  </span>
+                  {page.approvalStatus === "pending" && (
+                    <span className="mt-0.5 block text-xs font-medium text-sky-700 dark:text-sky-300">Menunggu persetujuan</span>
+                  )}
+                  {page.approvalStatus === "changes_requested" && (
+                    <span className="mt-0.5 block text-xs font-medium text-orange-700 dark:text-orange-300">Diminta perubahan</span>
+                  )}
                   {page.hasChanges && (
                     <span className="ml-1.5 text-[11px] text-amber-600 dark:text-amber-400">• ada perubahan</span>
                   )}

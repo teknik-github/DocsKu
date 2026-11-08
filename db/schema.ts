@@ -17,7 +17,8 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const roleEnum = pgEnum("role", ["admin", "editor"]);
+/** contributor: writes drafts and submits them for approval; cannot publish. */
+export const roleEnum = pgEnum("role", ["admin", "editor", "contributor"]);
 export const pageStatusEnum = pgEnum("page_status", ["draft", "scheduled", "published"]);
 export const commentStatusEnum = pgEnum("comment_status", ["pending", "approved", "spam"]);
 /** "home" is the single page shown at "/"; everything else lives under /docs. */
@@ -45,6 +46,8 @@ export const users = pgTable("users", {
   jobTitle: text("job_title"),
   bio: text("bio"),
   links: jsonb("links").$type<{ label: string; url: string }[]>().notNull().default([]),
+  /** Which notifications this person receives by email (keys are event names; missing = default). */
+  notificationPrefs: jsonb("notification_prefs").$type<Record<string, boolean>>().notNull().default({}),
   /** Two-step login (TOTP): the secret, AES-GCM encrypted with ENCRYPTION_KEY; set only once confirmed. */
   totpSecret: text("totp_secret"),
   totpEnabledAt: timestamp("totp_enabled_at", { withTimezone: true }),
@@ -126,6 +129,13 @@ export const pages = pgTable(
     ownerId: uuid("owner_id").references(() => users.id, { onDelete: "set null" }),
     reviewIntervalDays: integer("review_interval_days"),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    /** Bumped on every save of the working copy; editors send the version they loaded to detect conflicting edits. */
+    draftVersion: integer("draft_version").notNull().default(0),
+    /** Approval workflow: null (none), "pending" (submitted), "changes_requested". Approving publishes and clears it. */
+    approvalStatus: text("approval_status"),
+    approvalNote: text("approval_note"),
+    approvalRequestedById: uuid("approval_requested_by_id").references(() => users.id, { onDelete: "set null" }),
+    approvalRequestedAt: timestamp("approval_requested_at", { withTimezone: true }),
     /** Working copy differs from what is live. */
     hasChanges: boolean("has_changes").notNull().default(false),
     status: pageStatusEnum("status").notNull().default("draft"),
@@ -403,3 +413,78 @@ export const pageTemplates = pgTable("page_templates", {
 });
 
 export type PageTemplate = typeof pageTemplates.$inferSelect;
+
+/** Who has a page open in the editor right now (heartbeat every ~20 s; stale after ~60 s). */
+export const pagePresence = pgTable(
+  "page_presence",
+  {
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** One row per browser tab, so two tabs of the same person are told apart. */
+    tabId: text("tab_id").notNull(),
+    lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.pageId, t.userId, t.tabId] }), index("page_presence_seen_idx").on(t.lastSeen)],
+);
+
+/** Emails waiting to be sent (or sent), delivered by the scheduler tick with retries. */
+export const emailOutbox = pgTable(
+  "email_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    to: text("to").notNull(),
+    subject: text("subject").notNull(),
+    text: text("text").notNull(),
+    html: text("html"),
+    /** Event that produced it, e.g. "comment.new", "digest.review". */
+    event: text("event").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("email_outbox_due_idx").on(t.status, t.nextAttemptAt)],
+);
+
+/** Outgoing webhooks (Slack, Discord, Telegram or a custom URL). The URL/token is AES-GCM encrypted. */
+export const webhooks = pgTable("webhooks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  /** "slack" | "discord" | "telegram" | "custom" */
+  kind: text("kind").notNull(),
+  /** Encrypted target: the webhook URL, or for Telegram "botToken|chatId". */
+  target: text("target").notNull(),
+  /** Encrypted signing secret for custom webhooks (HMAC-SHA256 header). */
+  secret: text("secret"),
+  events: text("events").array().notNull().default(sql`'{}'::text[]`),
+  enabled: boolean("enabled").notNull().default(true),
+  createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  ...timestamps,
+});
+
+/** Each attempt to deliver an event to a webhook, retried by the scheduler tick. */
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    webhookId: uuid("webhook_id")
+      .notNull()
+      .references(() => webhooks.id, { onDelete: "cascade" }),
+    event: text("event").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    responseStatus: integer("response_status"),
+    lastError: text("last_error"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("webhook_deliveries_due_idx").on(t.status, t.nextAttemptAt), index("webhook_deliveries_hook_idx").on(t.webhookId, t.createdAt)],
+);

@@ -1,6 +1,6 @@
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 import { countHit, findRedirect, normalisePath } from "@/lib/redirects";
-import { widgetFrameSources } from "@/lib/widget-frame";
+import { widgetEnabled, widgetFrameSources } from "@/lib/widget-frame";
 import { PROXY_SESSION_COOKIE, authorExists, docPathExists, languageHomeExists, widgetArticleExists } from "@/lib/route-exists";
 
 /** First path segments owned by other routes; anything else with one segment may be a language home (/<code>). */
@@ -38,6 +38,8 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
   // next.config.ts sends "frame-ancestors 'none'" there; this replaces it per request.
   const { pathname } = request.nextUrl;
   if (pathname === "/widget" || pathname.startsWith("/widget/")) {
+    // On/off is decided here, per request, so switching the widget on takes effect at once.
+    if (!(await widgetEnabled())) return notFoundResponse(request);
     const article = pathname.match(/^\/widget\/a\/(.+)$/);
     if (article && !(await exists(() => widgetArticleExists(safeDecode(article[1]))))) return notFoundResponse(request);
     const response = NextResponse.next();

@@ -1,6 +1,9 @@
 import { Suspense } from "react";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/dal";
+import { can } from "@/lib/auth/permissions";
+import { canEditPage } from "@/lib/auth/page-access";
+import { getApprovalInfo } from "@/lib/collab/approval";
 import { getPageForEditor, listRevisions } from "@/lib/data/admin";
 import { PageEditor } from "@/components/admin/editor/page-editor";
 import { isAiReady } from "@/lib/ai/config";
@@ -27,6 +30,9 @@ async function EditorLoader({ params }: Pick<PageProps<"/admin/pages/[id]">, "pa
     readAutomation(),
   ]);
   if (!page) notFound();
+  // Contributors only open their own pages.
+  if (!(await canEditPage(user, page.id))) redirect("/admin/pages");
+  const approval = await getApprovalInfo(page.id);
 
   return (
     <PageEditor
@@ -45,11 +51,15 @@ async function EditorLoader({ params }: Pick<PageProps<"/admin/pages/[id]">, "pa
         featured: page.featured,
         visibility: page.visibility,
         updatedAt: page.updatedAt.toISOString(),
+        draftVersion: page.draftVersion,
+        approval,
       }}
       revisions={revisions.map((revision) => ({ ...revision, createdAt: revision.createdAt.toISOString() }))}
       aiEnabled={aiEnabled}
       navigation={{ ...navigation, navSection: page.navSection, auto: automation.navigation }}
       isAdmin={user.role === "admin"}
+      permissions={{ publish: can(user, "pages.publish"), approve: can(user, "pages.approve"), staff: can(user, "pages.editAny"), templates: can(user, "templates.manage") }}
+      viewer={{ id: user.id, name: user.name }}
     />
   );
 }
