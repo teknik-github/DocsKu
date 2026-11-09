@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { isSameOrigin } from "@/lib/auth/request";
@@ -19,10 +19,17 @@ import {
 } from "@/lib/ai/conversations";
 import { AI_PRESETS } from "@/lib/ai/presets";
 import { getSiteSettings } from "@/lib/data/site";
+import { can } from "@/lib/auth/permissions";
+import { editablePageIds } from "@/lib/auth/page-access";
+import { toMarkdown } from "@/lib/content/markdown";
+import { writingStyleText } from "@/lib/ai/style-server";
+import type { AttachedPage } from "@/lib/ai/agent";
 
 const requestSchema = z.object({
   conversationId: z.uuid().nullable().optional(),
   message: z.string().trim().min(1).max(20_000),
+  /** Pages attached with "@" (at most five). */
+  attachments: z.array(z.uuid()).max(5).optional(),
   model: z.string().regex(MODEL_PATTERN).nullable().optional(),
   page: z
     .object({
@@ -80,10 +87,34 @@ export async function POST(request: Request) {
     conversation = toConversation(row);
   }
 
+  // "@" attachments: the working copy of pages this person may read here (contributors: their own, or published public ones).
+  const attachedRows = body.attachments?.length
+    ? await db
+        .select({
+          id: schema.pages.id,
+          slug: schema.pages.slug,
+          title: schema.pages.draftTitle,
+          content: schema.pages.draftContent,
+          status: schema.pages.status,
+          visibility: schema.pages.visibility,
+        })
+        .from(schema.pages)
+        .where(and(inArray(schema.pages.id, body.attachments), eq(schema.pages.kind, "doc")))
+    : [];
+  const editable = can(user, "pages.editAny") ? null : new Set(await editablePageIds(user, attachedRows.map((row) => row.id)));
+  const attached = attachedRows.filter((row) => !editable || editable.has(row.id) || (row.status === "published" && row.visibility === "public"));
+  const attachments: AttachedPage[] = attached.map((row) => ({ title: row.title || "Tanpa judul", slug: row.slug, markdown: toMarkdown(row.content) }));
+
   const model = body.model ?? conversation.model ?? config.model;
   const effective = { ...config, model };
   const now = new Date().toISOString();
-  const userMessage: ChatMessage = { id: randomUUID(), role: "user", content: body.message, createdAt: now };
+  const userMessage: ChatMessage = {
+    id: randomUUID(),
+    role: "user",
+    content: body.message,
+    ...(attached.length ? { attachments: attached.map((row) => ({ id: row.id, title: row.title || "Tanpa judul", slug: row.slug })) } : {}),
+    createdAt: now,
+  };
   const reply: Extract<ChatMessage, { role: "assistant" }> = {
     id: randomUUID(),
     role: "assistant",
@@ -96,7 +127,7 @@ export async function POST(request: Request) {
   const messages = [...conversation.messages, userMessage];
   await save(conversation.id, { messages, ...(body.model !== undefined ? { model: body.model } : {}) });
 
-  const site = await getSiteSettings();
+  const [site, style] = await Promise.all([getSiteSettings(), writingStyleText()]);
   const encoder = new TextEncoder();
   const current = conversation;
   const stream = new ReadableStream({
@@ -134,6 +165,9 @@ export async function POST(request: Request) {
           summary,
           emit,
           signal: request.signal,
+          user,
+          attachments,
+          style,
         });
       } catch (error) {
         if (!request.signal.aborted) {

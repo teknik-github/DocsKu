@@ -57,6 +57,7 @@ const TEXT: Record<string, (m: Meta) => ActivityText> = {
   "page.visibility": (m) => ({ verb: str(m.visibility ?? m.to) === "internal" ? "menjadikan internal" : "menjadikan publik" }),
   "page.review": () => ({ verb: "menandai sudah ditinjau", tone: "good" }),
   "page.owner": () => ({ verb: "mengubah penanggung jawab" }),
+  "page.ai_edit": () => ({ verb: "menerapkan perubahan dari AI Chat pada" }),
   "page.author": (m) => ({ verb: "mengganti penulis", after: m.author ? ` menjadi ${str(m.author)}` : "" }),
   "template.create": () => ({ verb: "menyimpan templat" }),
   "template.update": () => ({ verb: "mengubah templat" }),

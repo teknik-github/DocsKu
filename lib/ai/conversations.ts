@@ -19,9 +19,13 @@ export function titleFrom(text: string) {
 
 /** What the model sees of a stored message: its text plus a note per proposal. */
 export function historyEntry(message: ChatMessage): { role: "user" | "assistant"; content: string } {
-  if (message.role === "user") return { role: "user", content: message.content };
+  if (message.role === "user") {
+    // Attached pages' content only went with that message; later turns see what was attached.
+    const attached = message.attachments?.length ? `\n\n[Dilampirkan: ${message.attachments.map((a) => `${a.title} (/docs/${a.slug})`).join(", ")}]` : "";
+    return { role: "user", content: message.content + attached };
+  }
   const notes = message.proposals.map((p) => {
-    const what = p.kind === "new" ? `halaman baru “${p.title}”` : "perubahan halaman";
+    const what = p.kind === "new" ? `halaman baru “${p.title}”` : p.target ? `perubahan halaman “${p.target.title}” (/docs/${p.target.slug})` : "perubahan halaman";
     const outcome =
       p.status === "applied"
         ? p.kind === "new"

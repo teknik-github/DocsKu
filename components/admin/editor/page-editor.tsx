@@ -119,6 +119,7 @@ export function PageEditor({
   viewer,
   initialNote,
   initialChat,
+  styleAvoid = [],
 }: {
   page: EditorPage;
   revisions: RevisionItem[];
@@ -133,6 +134,8 @@ export function PageEditor({
   initialNote?: string;
   /** Opens AI Chat with this request typed in, not sent (Statistik → "Saran AI"). */
   initialChat?: string;
+  /** Words the team avoids (Pengaturan → Gaya penulisan), flagged by the writing checks. */
+  styleAvoid?: string[];
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(page.title);
@@ -355,7 +358,7 @@ export function PageEditor({
   async function publishChecked(when: string | null) {
     const current = editorRef.current;
     if (current && !isHome) {
-      const problems = checkQuality({ title: titleRef.current, description: descriptionRef.current, seoTitle: seoRef.current.title, seoDescription: seoRef.current.description, doc: current.state.doc }).issues.filter(
+      const problems = checkQuality({ title: titleRef.current, description: descriptionRef.current, seoTitle: seoRef.current.title, seoDescription: seoRef.current.description, doc: current.state.doc, avoid: styleAvoid }).issues.filter(
         (issue) => issue.level !== "info",
       );
       if (problems.length > 0 || notes.open > 0) {
@@ -956,6 +959,7 @@ export function PageEditor({
           description={description}
           seo={seo}
           isHome={isHome}
+          avoid={styleAvoid}
           pageId={page.id}
           viewer={viewer}
           canModerate={permissions.staff}

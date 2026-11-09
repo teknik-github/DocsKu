@@ -48,7 +48,8 @@ function pageContext(req: AiRequest) {
   return parts.length ? parts.join("\n\n") : "";
 }
 
-export function buildMessages(req: AiRequest): ChatMessage[] {
+/** `style`: the team's writing style (lib/ai/style.ts), appended to the system prompt. */
+export function buildMessages(req: AiRequest, style = ""): ChatMessage[] {
   const context = pageContext(req);
   const inlineRule = req.inline
     ? "\n\nTeks ini bagian dari satu paragraf: balas sebagai teks sebaris tanpa judul, daftar, atau baris baru."
@@ -67,7 +68,7 @@ export function buildMessages(req: AiRequest): ChatMessage[] {
   }
 
   return [
-    { role: "system", content: SYSTEM },
+    { role: "system", content: style ? `${SYSTEM}\n\n${style}` : SYSTEM },
     { role: "user", content: context ? `${context}\n\n---\n\n${task}` : task },
   ];
 }

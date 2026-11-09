@@ -12,6 +12,9 @@ import { readAutomation } from "@/lib/automation";
 import { AutomationForm } from "@/components/admin/automation-form";
 import { CommentSettingsForm } from "@/components/admin/comment-settings-form";
 import { AskAiSettingsForm } from "@/components/admin/ask-ai-settings-form";
+import { StyleSettingsForm } from "@/components/admin/style-settings-form";
+import { readWritingStyle } from "@/lib/ai/style-server";
+import { getGlossary } from "@/lib/data/site";
 import { SettingsNav, type SettingsSection } from "@/components/admin/settings-nav";
 import { askedToday } from "@/lib/ai/ask";
 import { countOverdueReviews, getReviewSettings } from "@/lib/review";
@@ -96,6 +99,8 @@ async function Settings() {
     db.execute<{ locale: string; n: number }>(sql`select locale, count(*)::int as n from pages where translation_of is not null group by locale`),
   ]);
   const [email, outbox, webhookData] = await Promise.all([readEmailSettings(), outboxStats(), loadWebhooks()]);
+  const [style, glossary] = await Promise.all([readWritingStyle(), getGlossary()]);
+  const styleRules = [style.voice, style.rules].filter((text) => text.trim()).length + (style.avoid.length ? 1 : 0);
   const automationOn = (["navigation", "slug", "description", "seo", "cover"] as const).filter((key) => automation[key]).length;
 
   const sections: SettingsSection[] = [
@@ -105,6 +110,7 @@ async function Settings() {
       label: "AI",
       status: aiReady ? { text: `Aktif · ${ai.model}`, tone: "on" } : ai.enabled ? { text: "Belum lengkap", tone: "warn" } : { text: "Mati", tone: "off" },
     },
+    { id: "gaya", label: "Gaya penulisan", status: styleRules ? { text: "Diatur", tone: "on" } : { text: "Bawaan", tone: "off" } },
     {
       id: "tanya-ai",
       label: "Tanya AI",
@@ -167,6 +173,9 @@ async function Settings() {
         </Section>
         <Section id="ai">
           <AiSettingsForm initial={toView(ai)} />
+        </Section>
+        <Section id="gaya">
+          <StyleSettingsForm initial={style} glossaryTerms={glossary.terms.length} />
         </Section>
         <Section id="tanya-ai">
           <AskAiSettingsForm initial={askAi} aiReady={aiReady} askedToday={asked} />

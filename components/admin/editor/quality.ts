@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import { avoidedWordsIn } from "@/lib/ai/style";
 
 /**
  * Writing checks for the page editor ("Periksa" → Kualitas, and before
@@ -77,7 +78,7 @@ const sentencesIn = (text: string) =>
     .map((sentence) => sentence.trim())
     .filter((sentence) => wordsIn(sentence).length > 0);
 
-export function checkQuality(input: { title: string; description: string; seoTitle?: string; seoDescription?: string; doc: QNode; isHome?: boolean }): QualityReport {
+export function checkQuality(input: { title: string; description: string; seoTitle?: string; seoDescription?: string; doc: QNode; isHome?: boolean; avoid?: string[] }): QualityReport {
   const issues: QualityIssue[] = [];
   const add = (issue: QualityIssue) => issues.push(issue);
   const title = input.title.trim();
@@ -171,6 +172,11 @@ export function checkQuality(input: { title: string; description: string; seoTit
   if (!input.isHome && words > 0 && words < SHORT_PAGE) add({ id: "page-short", level: "info", message: `Isi halaman baru ${words} kata.`, hint: "Halaman pendek boleh saja; pastikan pembaca tetap mendapat jawaban lengkap." });
   if (label === "Sulit") add({ id: "readability", level: "warn", message: `Kalimat rata-rata ${avgSentence} kata.`, hint: "Kalimat di bawah 20 kata lebih mudah dipahami. Pecah kalimat panjang menjadi dua." });
   else if (longSentences > 0) add({ id: "sentences-long", level: "info", message: `${longSentences} kalimat lebih dari ${LONG_SENTENCE} kata.`, hint: "Coba pecah kalimat panjang menjadi dua." });
+
+  // Pengaturan → Gaya penulisan: words the team doesn't use.
+  const avoided = avoidedWordsIn(`${title}\n${description}\n${allText}`, input.avoid ?? []);
+  if (avoided.length)
+    add({ id: "style-avoid", level: "warn", message: `Memakai kata yang dihindari tim: ${avoided.map((word) => `“${word}”`).join(", ")}.`, hint: "Lihat Pengaturan → Gaya penulisan." });
 
   const order: Record<QualityLevel, number> = { error: 0, warn: 1, info: 2 };
   issues.sort((a, b) => order[a.level] - order[b.level] || (a.pos ?? -1) - (b.pos ?? -1));

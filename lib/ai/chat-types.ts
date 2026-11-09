@@ -15,9 +15,19 @@ export type CurrentPage = {
   markdown: string;
 };
 
+/** A page attached to a message with "@" (its content goes to the model with that message). */
+export type ChatAttachment = { id: string; title: string; slug: string };
+
 export type Proposal = {
   id: string;
   kind: "new" | "edit";
+  /**
+   * Edits of a page other than the one open in the editor (audits, /admin/ai):
+   * applied on the server to that page's working copy.
+   */
+  target?: { id: string; slug: string; title: string };
+  /** Edits: the page's content (Markdown) when the edit was proposed, for the diff view. */
+  baseMarkdown?: string;
   title?: string;
   description?: string;
   slug?: string;
@@ -42,7 +52,7 @@ export type ProposalState = Proposal & {
 };
 
 export type ChatMessage =
-  | { id: string; role: "user"; content: string; createdAt: string }
+  | { id: string; role: "user"; content: string; attachments?: ChatAttachment[]; createdAt: string }
   | {
       id: string;
       role: "assistant";
@@ -65,6 +75,7 @@ export type ConversationListItem = {
   pageTitle: string | null;
   updatedAt: string;
   messageCount: number;
+  pinned: boolean;
 };
 
 export type Conversation = {

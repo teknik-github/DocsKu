@@ -219,6 +219,8 @@ export const aiConversations = pgTable(
     /** Auto-compaction: a summary standing in for the first `compactedCount` messages. */
     summary: text("summary"),
     compactedCount: integer("compacted_count").notNull().default(0),
+    /** Kept at the top of the history list. */
+    pinned: boolean("pinned").notNull().default(false),
     ...timestamps,
   },
   (t) => [index("ai_conversations_user_idx").on(t.userId, t.updatedAt)],

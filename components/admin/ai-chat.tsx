@@ -5,7 +5,11 @@ import Link from "next/link";
 import {
   ArrowDown,
   ArrowUp,
+  AtSign,
   Check,
+  ClipboardCheck,
+  FileText,
+  PanelLeftOpen,
   ChevronDown,
   Copy,
   Cpu,
@@ -21,7 +25,6 @@ import {
   Shrink,
   Sparkles,
   Square,
-  Trash2,
   X,
 } from "lucide-react";
 import { createDraftFromProposal } from "@/app/admin/_actions/pages";
@@ -33,14 +36,25 @@ import {
   listConversations,
   renameConversation,
   setConversationModel,
+  setConversationPinned,
+  searchPagesForMention,
+  applyProposalToPage,
+  convertProposalMarkdown,
   truncateConversation,
   updateProposal,
 } from "@/app/admin/_actions/chat";
 import { copyText } from "@/lib/copy-text";
 import { describeUsage, readNdjson, renderChatMarkdown } from "@/components/admin/editor/ai-client";
 import { formatDateTime } from "@/components/admin/format";
-import type { AgentEvent, ChatMessage, ConversationListItem, CurrentPage, Proposal, ProposalState } from "@/lib/ai/chat-types";
+import type { AgentEvent, ChatAttachment, ChatMessage, ConversationListItem, CurrentPage, Proposal, ProposalState } from "@/lib/ai/chat-types";
 import { confirmDialog } from "@/components/admin/dialog";
+import { ChatHistory } from "@/components/admin/ai-chat-history";
+import { ProposalDiff } from "@/components/admin/proposal-diff";
+
+/** At most this many pages attached to one message with "@". */
+const MAX_ATTACHMENTS = 5;
+/** "@query" right before the cursor. */
+const MENTION = /(^|\s)@([^\s@]{0,40})$/;
 
 type Assistant = Extract<ChatMessage, { role: "assistant" }>;
 type ApplyMode = "draft" | "publish" | "schedule";
@@ -58,11 +72,17 @@ const STARTERS = {
     "Beri ide 5 topik dokumentasi yang belum ada di situs ini",
     "Buat kerangka halaman panduan instalasi",
     "Tulis halaman baru: panduan memulai untuk pemula",
-    "Halaman mana yang perlu ditambah agar dokumentasi lengkap?",
     "Bagaimana cara instalasi menurut dokumentasi ini?",
-    "Cari halaman yang isinya sudah usang atau tumpang tindih",
   ],
 };
+
+/** Audits: the agent looks up problem pages (audit_pages) and proposes fixes. */
+const AUDITS = [
+  { label: "Halaman yang perlu ditinjau", prompt: "Audit halaman yang sudah lewat jadwal tinjauan. Sebutkan masalah tiap halaman dan usulkan perbaikan untuk yang paling penting." },
+  { label: "Tautan rusak", prompt: "Audit tautan rusak di dokumentasi. Untuk tiap halaman, jelaskan tautan mana yang rusak dan usulkan perbaikannya." },
+  { label: "Kualitas tulisan rendah", prompt: "Audit halaman dengan skor kualitas tulisan rendah dan usulkan perbaikan untuk yang paling penting." },
+  { label: "Langkah yang mungkin usang", prompt: "Cari halaman yang paling lama tidak diubah dan periksa apakah langkah, versi, atau perintahnya mungkin sudah usang. Usulkan perbaikan untuk yang paling penting." },
+];
 
 export function AiChat({
   enabled,
@@ -96,6 +116,11 @@ export function AiChat({
   const [defaultModel, setDefaultModel] = useState("");
   const [model, setModel] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  /** Full page, wide screens: the history column can be hidden. */
+  const [historyHidden, setHistoryHidden] = useState(false);
+  /** Pages attached to the next message with "@". */
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [mention, setMention] = useState<{ query: string; results: { id: string; title: string; slug: string; status: string }[]; active: number } | null>(null);
   const [input, setInput] = useState(initialInput ?? "");
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
@@ -190,9 +215,12 @@ export function AiChat({
     const content = text.trim();
     if (!content || busy) return;
     const now = new Date().toISOString();
+    const attached = attachments;
+    setAttachments([]);
+    setMention(null);
     setMessages((list) => [
       ...list,
-      { id: `local-user-${now}`, role: "user", content, createdAt: now },
+      { id: `local-user-${now}`, role: "user", content, ...(attached.length ? { attachments: attached } : {}), createdAt: now },
       { id: `local-reply-${now}`, role: "assistant", content: "", tools: [], proposals: [], createdAt: now },
     ]);
     setInput("");
@@ -209,6 +237,7 @@ export function AiChat({
         body: JSON.stringify({
           conversationId: activeId,
           message: content,
+          attachments: attached.map((a) => a.id),
           model: model || null,
           page: getPage?.() ?? null,
         }),
@@ -293,8 +322,11 @@ export function AiChat({
     return activeId ? updateProposal(activeId, messageId, proposalId, patch) : Promise.resolve();
   }
 
-  /** New pages: "draft" only creates it; "publish"/"schedule" also publish it, because the user clicked that. */
-  async function apply(messageId: string, p: ProposalState, mode: ApplyMode = "draft") {
+  /**
+   * New pages: "draft" only creates it; "publish"/"schedule" also publish it, because the user clicked that.
+   * Edits: `contentMarkdown` is set when only some sections were kept in the diff.
+   */
+  async function apply(messageId: string, p: ProposalState, mode: ApplyMode = "draft", contentMarkdown?: string) {
     if (p.kind === "new") {
       const result = await createDraftFromProposal({
         title: p.title ?? "Tanpa judul",
@@ -311,9 +343,27 @@ export function AiChat({
         p.id,
         result.ok ? { status: "applied", draftId: result.id, pageStatus: result.status, error: undefined } : { error: result.error },
       );
+    } else if (p.target) {
+      // Another page than the one open: applied on the server to its working copy (never published).
+      if (!activeId) return;
+      const result = await applyProposalToPage(activeId, messageId, p.id, contentMarkdown !== undefined ? { contentMarkdown } : undefined);
+      setMessages((list) =>
+        list.map((m) =>
+          m.role === "assistant" && m.id === messageId
+            ? { ...m, proposals: m.proposals.map((x) => (x.id === p.id ? { ...x, ...(result.ok ? { status: "applied" as const, error: undefined } : { error: result.error }) } : x)) }
+            : m,
+        ),
+      );
+      return;
     } else {
+      let proposal: Proposal = p;
+      if (contentMarkdown !== undefined) {
+        const doc = await convertProposalMarkdown(contentMarkdown);
+        if (!doc) return;
+        proposal = { ...p, contentMarkdown, contentDoc: doc };
+      }
       try {
-        await onApplyEdit?.(p);
+        await onApplyEdit?.(proposal);
       } catch {
         // The editor refused (e.g. a conflicting save by someone else) and says why; the proposal stays applicable.
         return;
@@ -359,6 +409,42 @@ export function AiChat({
     setNotice("Percakapan diringkas. Pesan lama tidak dikirim ulang ke AI.");
   }
 
+  async function pin(id: string, pinned: boolean) {
+    setConversations((list) => list?.map((c) => (c.id === id ? { ...c, pinned } : c)) ?? list);
+    await setConversationPinned(id, pinned);
+    await refreshList();
+  }
+
+  async function renameItem(id: string, next: string) {
+    if (id === activeId) setTitle(next);
+    await renameConversation(id, next);
+    await refreshList();
+  }
+
+  /** "@" picker: searches as the person types after "@". */
+  function updateMention(value: string, caret: number) {
+    const match = MENTION.exec(value.slice(0, caret));
+    if (!match) return setMention(null);
+    const query = match[2];
+    setMention((current) => ({ query, results: current?.results ?? [], active: 0 }));
+    void searchPagesForMention(query).then((results) =>
+      setMention((current) => (current && current.query === query ? { ...current, results: results.filter((r) => !attachments.some((a) => a.id === r.id)) } : current)),
+    );
+  }
+
+  function attach(page: { id: string; title: string; slug: string }) {
+    const el = textarea.current;
+    const caret = el?.selectionStart ?? input.length;
+    const before = input.slice(0, caret).replace(MENTION, (_, space: string) => space);
+    setInput(before + input.slice(caret));
+    setAttachments((list) => (list.some((a) => a.id === page.id) || list.length >= MAX_ATTACHMENTS ? list : [...list, { id: page.id, title: page.title, slug: page.slug }]));
+    setMention(null);
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(before.length, before.length);
+    });
+  }
+
   async function remove(id: string) {
     const ok = await confirmDialog({ title: "Hapus percakapan ini?", message: "Seluruh pesan dalam percakapan ini dihapus permanen.", confirmLabel: "Hapus", tone: "danger" });
     if (!ok) return;
@@ -380,13 +466,16 @@ export function AiChat({
   }
 
   const historyList = (
-    <HistoryList
+    <ChatHistory
       conversations={conversations}
       activeId={activeId}
       showPage={mode === "global"}
       onOpen={open}
       onNew={startNew}
       onDelete={remove}
+      onPin={(id, pinned) => void pin(id, pinned)}
+      onRename={(id, next) => void renameItem(id, next)}
+      onCollapse={layout === "page" ? () => setHistoryHidden(true) : undefined}
     />
   );
 
@@ -399,6 +488,13 @@ export function AiChat({
             <History className="size-4" />
           </IconButton>
         </span>
+        {layout === "page" && historyHidden && (
+          <span className="hidden md:inline-flex">
+            <IconButton label="Tampilkan riwayat" onClick={() => setHistoryHidden(false)}>
+              <PanelLeftOpen className="size-4" />
+            </IconButton>
+          </span>
+        )}
         <Sparkles className="size-4 shrink-0 text-accent" />
         <TitleEditor
           title={title}
@@ -468,6 +564,26 @@ export function AiChat({
                 </button>
               ))}
             </div>
+            {mode === "global" && (
+              <div className={layout === "page" ? "mt-6 w-full text-left" : "mt-3"} data-testid="audit-starters">
+                <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">
+                  <ClipboardCheck className="size-3.5" />
+                  Audit dokumentasi
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {AUDITS.map((audit) => (
+                    <button
+                      key={audit.label}
+                      type="button"
+                      onClick={() => send(audit.prompt)}
+                      className="rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-fg-muted transition-colors hover:border-accent hover:text-fg"
+                    >
+                      {audit.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -476,6 +592,16 @@ export function AiChat({
             {i === compactedCount && compactedCount > 0 && summary && <CompactedDivider count={compactedCount} summary={summary} />}
             {message.role === "user" ? (
               <div className="group/user flex flex-col items-end gap-1">
+                {message.attachments && message.attachments.length > 0 && (
+                  <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
+                    {message.attachments.map((a) => (
+                      <span key={a.id} className="inline-flex max-w-56 items-center gap-1 rounded-md border border-line bg-surface px-1.5 py-0.5 text-[11px] text-fg-muted">
+                        <FileText className="size-3 shrink-0" />
+                        <span className="truncate">{a.title}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="max-w-[85%] rounded-2xl rounded-br-md bg-fill px-3.5 py-2 text-sm whitespace-pre-wrap text-fg">{message.content}</div>
                 {!busy && i >= compactedCount && i === messages.findLastIndex((m) => m.role === "user") && (
                   <div className="flex gap-0.5 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
@@ -487,6 +613,12 @@ export function AiChat({
               </div>
             ) : (
               <div className="space-y-2">
+                <p className="flex items-center gap-1.5 text-[11px] font-medium text-fg-subtle">
+                  <span className="flex size-5 items-center justify-center rounded-full bg-accent-soft text-accent">
+                    <Sparkles className="size-3" />
+                  </span>
+                  AI{message.model ? <span className="font-normal">· {message.model}</span> : null}
+                </p>
                 {message.tools.length > 0 && <ToolSteps tools={message.tools} live={busy && i === messages.length - 1} />}
                 {message.content && (
                   <div className="chat-prose text-sm leading-relaxed text-fg" dangerouslySetInnerHTML={{ __html: renderChatMarkdown(message.content) }} />
@@ -496,7 +628,7 @@ export function AiChat({
                     key={proposal.id}
                     proposal={proposal}
                     current={getPage}
-                    onApply={(mode) => apply(message.id, proposal, mode)}
+                    onApply={(mode, markdown) => apply(message.id, proposal, mode, markdown)}
                     onDismiss={() => void setProposal(message.id, proposal.id, { status: "dismissed" })}
                   />
                 ))}
@@ -555,12 +687,73 @@ export function AiChat({
       >
         <div className={layout === "page" ? "mx-auto max-w-3xl" : ""}>
         {notice && <p className="mb-2 text-[11px] text-fg-muted">{notice}</p>}
-        <div className="rounded-xl border border-line bg-surface focus-within:border-accent">
+        <div className="relative rounded-xl border border-line bg-surface focus-within:border-accent">
+          {mention && (
+            <div className="absolute right-0 bottom-full left-0 z-20 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-lg" data-testid="mention-picker">
+              <p className="border-b border-line px-3 py-1.5 text-[11px] text-fg-subtle">
+                Lampirkan halaman{mention.query ? ` · “${mention.query}”` : ""} {attachments.length >= MAX_ATTACHMENTS && `(maks. ${MAX_ATTACHMENTS})`}
+              </p>
+              {mention.results.length === 0 ? (
+                <p className="px-3 py-3 text-xs text-fg-subtle">Tidak ada halaman yang cocok.</p>
+              ) : (
+                <ul role="listbox" className="max-h-56 overflow-y-auto py-1">
+                  {mention.results.map((result, i) => (
+                    <li key={result.id} role="option" aria-selected={i === mention.active}>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => attach(result)}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${i === mention.active ? "bg-fill" : "hover:bg-fill/60"}`}
+                      >
+                        <FileText className="size-3.5 shrink-0 text-fg-subtle" />
+                        <span className="min-w-0 flex-1 truncate text-fg">{result.title}</span>
+                        <span className="shrink-0 font-mono text-[10px] text-fg-subtle">{result.status === "published" ? `/docs/${result.slug}` : "draf"}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1 px-2 pt-2" data-testid="chat-attachments">
+              {attachments.map((a) => (
+                <span key={a.id} className="inline-flex max-w-60 items-center gap-1 rounded-md bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent">
+                  <FileText className="size-3 shrink-0" />
+                  <span className="truncate">{a.title}</span>
+                  <button type="button" onClick={() => setAttachments((list) => list.filter((x) => x.id !== a.id))} aria-label={`Lepas lampiran ${a.title}`} className="rounded hover:bg-accent/15">
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <textarea
             ref={textarea}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              updateMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+            }}
             onKeyDown={(e) => {
+              if (mention && mention.results.length) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const step = e.key === "ArrowDown" ? 1 : -1;
+                  setMention({ ...mention, active: (mention.active + step + mention.results.length) % mention.results.length });
+                  return;
+                }
+                if (e.key === "Enter" || e.key === "Tab") {
+                  e.preventDefault();
+                  attach(mention.results[mention.active]);
+                  return;
+                }
+              }
+              if (mention && e.key === "Escape") {
+                e.preventDefault();
+                setMention(null);
+                return;
+              }
               // Not while an input method is composing a word (e.g. Japanese or Chinese IME).
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -569,11 +762,33 @@ export function AiChat({
               if (e.key === "Escape" && busy) abort.current?.abort();
             }}
             rows={2}
-            placeholder="Tulis pesan… (Enter untuk kirim, Shift+Enter baris baru)"
+            placeholder="Tulis pesan… ketik @ untuk melampirkan halaman (Enter kirim, Shift+Enter baris baru)"
             aria-label="Pesan untuk AI"
             className="block min-h-12 w-full resize-none bg-transparent px-3 pt-2.5 text-sm outline-none placeholder:text-fg-subtle"
           />
           <div className="flex items-center gap-2 px-2 pb-2">
+            <button
+              type="button"
+              onClick={() => {
+                const el = textarea.current;
+                const caret = el?.selectionStart ?? input.length;
+                const needsSpace = caret > 0 && !/\s$/.test(input.slice(0, caret));
+                const next = `${input.slice(0, caret)}${needsSpace ? " " : ""}@${input.slice(caret)}`;
+                setInput(next);
+                const at = caret + (needsSpace ? 2 : 1);
+                updateMention(next, at);
+                requestAnimationFrame(() => {
+                  el?.focus();
+                  el?.setSelectionRange(at, at);
+                });
+              }}
+              disabled={attachments.length >= MAX_ATTACHMENTS}
+              aria-label="Lampirkan halaman"
+              title="Lampirkan halaman (@)"
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-fill text-fg-muted hover:text-fg disabled:opacity-40"
+            >
+              <AtSign className="size-3.5" />
+            </button>
             <label className="relative flex min-w-0 items-center">
               <Cpu className="pointer-events-none absolute left-2.5 size-3.5 text-fg-subtle" />
               <select
@@ -620,7 +835,7 @@ export function AiChat({
   if (layout === "page") {
     return (
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-64 shrink-0 flex-col border-r border-line md:flex">{historyList}</aside>
+        {!historyHidden && <aside className="hidden w-72 shrink-0 flex-col border-r border-line bg-page/40 md:flex">{historyList}</aside>}
         {chat}
       </div>
     );
@@ -754,65 +969,6 @@ function CopyAction({ text }: { text: string }) {
   );
 }
 
-function HistoryList({
-  conversations,
-  activeId,
-  showPage,
-  onOpen,
-  onNew,
-  onDelete,
-}: {
-  conversations: ConversationListItem[] | null;
-  activeId: string | null;
-  showPage: boolean;
-  onOpen: (id: string) => void;
-  onNew: () => void;
-  onDelete: (id: string) => void;
-}) {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="p-3">
-        <button
-          type="button"
-          onClick={onNew}
-          className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-line bg-surface text-xs font-medium hover:border-accent"
-        >
-          <Plus className="size-3.5" />
-          Percakapan baru
-        </button>
-      </div>
-      <p className="px-4 pb-1 text-[11px] font-medium tracking-wide text-fg-subtle uppercase">Riwayat</p>
-      <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
-        {conversations === null && <li className="px-2 py-2 text-xs text-fg-subtle">Memuat…</li>}
-        {conversations?.length === 0 && <li className="px-2 py-2 text-xs text-fg-subtle">Belum ada percakapan.</li>}
-        {conversations?.map((c) => (
-          <li key={c.id} className="group/item relative">
-            <button
-              type="button"
-              onClick={() => onOpen(c.id)}
-              className={`block w-full rounded-lg px-2.5 py-2 pr-8 text-left ${c.id === activeId ? "bg-fill" : "hover:bg-fill/60"}`}
-            >
-              <span className="block truncate text-xs text-fg">{c.title}</span>
-              <span className="block truncate text-[10px] text-fg-subtle">
-                {formatDateTime(c.updatedAt)}
-                {showPage && c.pageTitle && ` · ${c.pageTitle}`}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onDelete(c.id)}
-              aria-label={`Hapus ${c.title}`}
-              className="absolute top-2 right-1.5 inline-flex size-6 items-center justify-center rounded text-fg-subtle opacity-0 group-hover/item:opacity-100 hover:text-red-600 focus:opacity-100"
-            >
-              <Trash2 className="size-3.5" />
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function CompactedDivider({ count, summary }: { count: number; summary: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -933,19 +1089,26 @@ function ProposalCard({
 }: {
   proposal: ProposalState;
   current?: () => CurrentPage;
-  onApply: (mode: ApplyMode) => Promise<void>;
+  onApply: (mode: ApplyMode, contentMarkdown?: string) => Promise<void>;
   onDismiss: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [raw, setRaw] = useState(false);
-  const [pending, setPending] = useState<ApplyMode | null>(null);
-  const page = proposal.kind === "edit" ? current?.() : undefined;
-  const done = proposal.status === "applied";
-  const Icon = proposal.kind === "new" ? FilePlus2 : PencilLine;
   const isNew = proposal.kind === "new";
+  const targeted = Boolean(proposal.target);
+  const page = proposal.kind === "edit" && !targeted ? current?.() : undefined;
+  const done = proposal.status === "applied";
+  // Edits open on the diff; new pages on their content preview.
+  const base = proposal.baseMarkdown ?? page?.markdown;
+  const canDiff = !isNew && Boolean(proposal.contentMarkdown) && base !== undefined;
+  const [open, setOpen] = useState(canDiff && !done);
+  const [tab, setTab] = useState<"diff" | "preview" | "raw">(canDiff ? "diff" : "preview");
+  const [pending, setPending] = useState<ApplyMode | null>(null);
+  /** Markdown with only the kept sections; undefined while everything is kept. */
+  const [partial, setPartial] = useState<string | undefined>(undefined);
+  const Icon = isNew ? FilePlus2 : PencilLine;
+  const appliable = isNew || targeted || Boolean(current);
   // A dated proposal is scheduled by default; otherwise the main action only creates a draft.
   const actions: { mode: ApplyMode; label: string }[] = !isNew
-    ? [{ mode: "draft", label: "Terapkan" }]
+    ? [{ mode: "draft", label: partial !== undefined ? "Terapkan bagian terpilih" : targeted ? "Terapkan ke draf halaman" : "Terapkan" }]
     : proposal.publishAt
       ? [
           { mode: "schedule", label: "Buat & jadwalkan" },
@@ -967,15 +1130,30 @@ function ProposalCard({
     )
       return;
     setPending(mode);
-    await onApply(mode);
+    await onApply(mode, partial);
     setPending(null);
   }
 
+  const tabs: { id: "diff" | "preview" | "raw"; label: string }[] = [
+    ...(canDiff ? [{ id: "diff" as const, label: "Perbedaan" }] : []),
+    { id: "preview", label: "Pratinjau" },
+    { id: "raw", label: "Markdown" },
+  ];
+
   return (
-    <div className={`rounded-xl border p-3 ${done ? "border-emerald-300/60 bg-emerald-50/50 dark:bg-emerald-950/20" : "border-accent/40 bg-accent-soft/30"}`}>
-      <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-accent">
+    <div
+      className={`rounded-xl border p-3 ${done ? "border-emerald-300/60 bg-emerald-50/50 dark:bg-emerald-950/20" : "border-accent/40 bg-accent-soft/30"}`}
+      data-testid="proposal-card"
+    >
+      <p className="mb-2 flex flex-wrap items-center gap-1.5 text-xs font-medium text-accent">
         <Icon className="size-3.5" />
         {isNew ? "Usulan halaman baru" : "Usulan perubahan halaman"}
+        {proposal.target && (
+          <Link href={`/admin/pages/${proposal.target.id}`} className="inline-flex min-w-0 items-center gap-1 rounded-md bg-surface px-1.5 py-0.5 font-normal text-fg-muted hover:text-fg">
+            <FileText className="size-3 shrink-0" />
+            <span className="truncate">{proposal.target.title}</span>
+          </Link>
+        )}
       </p>
       <div className="space-y-2">
         {proposal.title && <Change label="Judul" before={page?.title} after={proposal.title} />}
@@ -995,24 +1173,31 @@ function ProposalCard({
             </button>
             {open && (
               <div className="mt-1 overflow-hidden rounded-lg border border-line bg-page">
-                <div className="flex gap-1 border-b border-line px-2 py-1">
-                  {(
-                    [
-                      [false, "Pratinjau"],
-                      [true, "Markdown"],
-                    ] as const
-                  ).map(([value, label]) => (
+                <div className="flex gap-1 border-b border-line px-2 py-1" role="tablist">
+                  {tabs.map((item) => (
                     <button
-                      key={label}
+                      key={item.id}
                       type="button"
-                      onClick={() => setRaw(value)}
-                      className={`rounded px-2 py-0.5 text-[11px] ${raw === value ? "bg-fill font-medium text-fg" : "text-fg-subtle hover:text-fg"}`}
+                      role="tab"
+                      aria-selected={tab === item.id}
+                      onClick={() => setTab(item.id)}
+                      className={`rounded px-2 py-0.5 text-[11px] ${tab === item.id ? "bg-fill font-medium text-fg" : "text-fg-subtle hover:text-fg"}`}
                     >
-                      {label}
+                      {item.label}
                     </button>
                   ))}
                 </div>
-                {raw ? (
+                {tab === "diff" && canDiff ? (
+                  <div className="p-2">
+                    <ProposalDiff
+                      base={base ?? ""}
+                      proposed={proposal.contentMarkdown}
+                      mode={proposal.contentMode === "append" ? "append" : "replace"}
+                      selectable={!done && proposal.status !== "dismissed" && proposal.contentMode !== "append"}
+                      onChange={(markdown, all) => setPartial(all ? undefined : markdown)}
+                    />
+                  </div>
+                ) : tab === "raw" ? (
                   <pre className="max-h-80 overflow-auto p-2 font-mono text-[11px] whitespace-pre-wrap text-fg-muted">{proposal.contentMarkdown}</pre>
                 ) : (
                   <div
@@ -1031,9 +1216,13 @@ function ProposalCard({
         {done ? (
           <span className="flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
             <Check className="size-3.5" />
-            {isNew ? DONE[proposal.pageStatus ?? "draft"] : "Diterapkan. Batalkan dengan Ctrl+Z atau dari Riwayat revisi."}
-            {proposal.draftId && (
-              <Link href={`/admin/pages/${proposal.draftId}`} className="ml-1 font-medium underline">
+            {isNew
+              ? DONE[proposal.pageStatus ?? "draft"]
+              : targeted
+                ? "Diterapkan ke draf halaman itu (belum terbit). Versi sebelumnya ada di Riwayat revisi."
+                : "Diterapkan. Batalkan dengan Ctrl+Z atau dari Riwayat revisi."}
+            {(proposal.draftId || proposal.target) && (
+              <Link href={`/admin/pages/${proposal.draftId ?? proposal.target?.id}`} className="ml-1 font-medium underline">
                 Buka halaman
               </Link>
             )}
@@ -1046,7 +1235,8 @@ function ProposalCard({
               <button
                 key={action.mode}
                 type="button"
-                disabled={pending !== null || (!isNew && !current)}
+                disabled={pending !== null || !appliable}
+                title={appliable ? undefined : "Buka halaman ini di editor untuk menerapkan perubahannya."}
                 onClick={() => run(action.mode)}
                 className={
                   i === 0

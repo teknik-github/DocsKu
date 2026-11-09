@@ -5,6 +5,7 @@ import { allow } from "@/lib/auth/rate-limit";
 import { getAiConfig } from "@/lib/ai/config";
 import { AiError, streamChat } from "@/lib/ai/client";
 import { buildMessages } from "@/lib/ai/prompts";
+import { writingStyleText } from "@/lib/ai/style-server";
 import { cacheKey, getCached, setCached } from "@/lib/ai/response-cache";
 import { AI_ACTIONS, AI_PRESETS } from "@/lib/ai/presets";
 
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
   if (!config.enabled) return json("AI Write belum diaktifkan di Pengaturan.", 400);
   if (!config.apiKey && AI_PRESETS[config.provider].needsKey) return json("API key AI belum diisi di Pengaturan.", 400);
 
-  const messages = buildMessages(req);
+  const messages = buildMessages(req, await writingStyleText());
   // A whole page or section from "Tulis dengan AI" needs more room than the default limit.
   const maxTokens = req.action === "description" ? 200 : req.action === "write" ? Math.max(config.maxTokens, 8000) : undefined;
   const key = cacheKey(config, messages, maxTokens);

@@ -229,7 +229,9 @@ export async function pageQuality(ids: string[]): Promise<Map<string, PageQualit
   const memo = (globalThis as { docskuQuality?: Map<string, PageQuality> }).docskuQuality ?? new Map<string, PageQuality>();
   (globalThis as { docskuQuality?: Map<string, PageQuality> }).docskuQuality = memo;
   const versions = await db.select({ id: schema.pages.id, version: schema.pages.draftVersion, updatedAt: schema.pages.updatedAt }).from(schema.pages).where(inArray(schema.pages.id, ids));
-  const keyOf = (row: { id: string; version: number; updatedAt: Date }) => `${row.id}:${row.version}:${row.updatedAt.getTime()}`;
+  // The style's avoided words change scores too.
+  const styleKey = JSON.stringify((await (await import("@/lib/ai/style-server")).readWritingStyle()).avoid);
+  const keyOf = (row: { id: string; version: number; updatedAt: Date }) => `${row.id}:${row.version}:${row.updatedAt.getTime()}:${styleKey}`;
   const missing: string[] = [];
   for (const row of versions) {
     const known = memo.get(keyOf(row));
@@ -237,13 +239,14 @@ export async function pageQuality(ids: string[]): Promise<Map<string, PageQualit
     else missing.push(row.id);
   }
   if (!missing.length) return result;
-  const { checkQuality, jsonNode, qualityScore } = await import("@/components/admin/editor/quality");
+  const [{ checkQuality, jsonNode, qualityScore }, { readWritingStyle }] = await Promise.all([import("@/components/admin/editor/quality"), import("@/lib/ai/style-server")]);
+  const { avoid } = await readWritingStyle();
   const rows = await db
     .select({ id: schema.pages.id, version: schema.pages.draftVersion, updatedAt: schema.pages.updatedAt, title: schema.pages.draftTitle, description: schema.pages.draftDescription, seo: schema.pages.draftSeo, content: schema.pages.draftContent })
     .from(schema.pages)
     .where(inArray(schema.pages.id, missing));
   for (const row of rows) {
-    const report = checkQuality({ title: row.title, description: row.description, seoTitle: row.seo?.title, seoDescription: row.seo?.description, doc: jsonNode(row.content) });
+    const report = checkQuality({ title: row.title, description: row.description, seoTitle: row.seo?.title, seoDescription: row.seo?.description, doc: jsonNode(row.content), avoid });
     const quality = { score: qualityScore(report), issues: report.issues.filter((issue) => issue.level !== "info").map((issue) => issue.message) };
     result.set(row.id, quality);
     memo.set(keyOf(row), quality);

@@ -14,6 +14,9 @@ import { partialStringFields } from "@/lib/ai/partial-json";
 import { pageWritingGuide } from "@/lib/ai/writing-guide";
 import { stem, terms } from "@/lib/ai/ask";
 import { textOf } from "@/lib/content/doc";
+import { canEditPage } from "@/lib/auth/page-access";
+import { AUDIT_FOCUS, auditPages, type AuditFocus } from "@/lib/ai/audit";
+import type { Role } from "@/db/schema";
 
 export type { AgentEvent, CurrentPage, Proposal };
 
@@ -111,10 +114,24 @@ export const COMPONENTS = `Komponen yang bisa dipakai di isi halaman (tulis pers
  * rides on the latest message instead of the system prompt: everything before
  * it stays byte-identical between requests and hits the provider's prompt cache.
  */
-function pageContext(page: CurrentPage | null, now: string) {
-  if (!page) return `[Waktu sekarang: ${now}]\n\n[Pesan pengguna]\n`;
+/** A page attached with "@": its content rides on the message that attached it. */
+export type AttachedPage = { title: string; slug: string; markdown: string };
+
+function attachmentContext(attachments: AttachedPage[]) {
+  if (!attachments.length) return "";
+  return `[Lampiran — halaman yang dilampirkan pengguna dengan @; gunakan isinya]
+${attachments
+  .map((page) => `### ${page.title} (/docs/${page.slug})\n"""\n${page.markdown.slice(0, 10_000) || "(kosong)"}\n"""`)
+  .join("\n\n")}
+
+`;
+}
+
+function pageContext(page: CurrentPage | null, now: string, attachments: AttachedPage[] = []) {
+  if (!page) return `[Waktu sekarang: ${now}]\n\n${attachmentContext(attachments)}[Pesan pengguna]\n`;
   return `[Waktu sekarang: ${now}]
 
+${attachmentContext(attachments)}
 [Konteks — halaman yang sedang dibuka di editor${
     page.kind === "home"
       ? " (BERANDA situs; isinya diawali blok Hero yang tidak bisa diubah lewat Markdown, jadi jangan usulkan contentMode replace untuk beranda)"
@@ -142,7 +159,7 @@ function nowInJakarta() {
 }
 
 /** Fixed instructions (plus the rarely-changing chat summary), so the prompt prefix stays cacheable. */
-function systemPrompt(siteName: string, hasPage: boolean, summary: string | null, hasExternal: boolean) {
+function systemPrompt(siteName: string, hasPage: boolean, summary: string | null, hasExternal: boolean, style: string) {
   return `Anda adalah asisten AI untuk menulis dan mengelola situs dokumentasi "${siteName}".
 Anda membantu: ide topik dan kerangka, judul alternatif, menulis dan menyunting isi, serta SEO (meta title, meta description, slug, kata kunci, struktur judul).
 
@@ -151,9 +168,12 @@ Cara kerja:
 - Gunakan tool search_pages, read_page, dan get_site_structure untuk melihat isi situs sebelum menyarankan, bila relevan. search_pages mencari kata per kata di judul, deskripsi, dan isi; pakai kata kunci pendek (2–4 kata).
 - Pertanyaan tentang isi dokumentasi: cari dan baca halaman yang relevan dulu, jawab berdasarkan isinya, dan tautkan sumbernya dengan format [Judul halaman](/docs/slug). Bila dokumentasi tidak membahasnya, katakan terus terang.
 - Sebelum mengusulkan halaman baru, cari dulu apakah topiknya sudah ada. Bila sudah, beri tahu pengguna dan tawarkan memperbarui halaman itu, kecuali pengguna memang meminta halaman terpisah.
-- Anda TIDAK PERNAH mengubah atau menerbitkan apa pun sendiri. Untuk halaman baru panggil propose_new_page${
-    hasPage ? "; untuk mengubah halaman yang sedang dibuka panggil propose_page_edit" : ""
+- Anda TIDAK PERNAH mengubah atau menerbitkan apa pun sendiri. Untuk halaman baru panggil propose_new_page; untuk mengubah halaman yang ada panggil propose_page_edit${
+    hasPage ? " (tanpa slug untuk halaman yang sedang dibuka)" : ""
   }. Pengguna yang memutuskan menerapkan usulan. Setelah memanggilnya, ringkas usulan Anda dalam 1–3 kalimat.
+- Mengubah halaman lain: baca dulu dengan read_page, lalu propose_page_edit dengan slug halaman itu. Dengan content_mode "replace", tulis ulang SELURUH isi halaman (bagian yang tidak diubah tetap disertakan apa adanya), karena isinya akan menggantikan yang lama.
+- Audit dokumentasi (mis. "periksa halaman yang perlu ditinjau", "cari tautan rusak", "halaman berkualitas rendah", "cari langkah yang usang"): panggil audit_pages dengan focus yang sesuai, baca halaman yang paling bermasalah, lalu sajikan temuan sebagai daftar ringkas per halaman (masalah → saran, dengan tautan [Judul](/docs/slug)). Usulkan perbaikan dengan propose_page_edit untuk paling banyak 3 halaman terpenting, kecuali pengguna meminta lebih.
+- Pesan pengguna bisa diawali [Lampiran] berisi halaman yang dilampirkan dengan @; isinya sudah tersedia, tidak perlu read_page lagi.
 - Untuk ide, kerangka, atau judul alternatif, cukup jawab di chat; jangan membuat usulan kecuali diminta menulis.
 - Untuk halaman baru, isi section dengan bagian navigasi yang paling cocok ("Tab › Section" dari get_site_structure) agar halaman masuk navigasi saat terbit.
 - Rencana atau jadwal konten: bila pengguna meminta beberapa tulisan sekaligus, panggil propose_new_page sekali untuk setiap halaman (boleh beberapa dalam satu langkah). Bila pengguna meminta jadwal, isi publish_at (ISO 8601 dengan zona waktu, mis. 2026-11-03T09:00:00+07:00; bawaan pukul 09.00 WIB) dihitung dari [Waktu sekarang]. Anda tetap tidak menerbitkan; pengguna yang menyetujui jadwalnya.
@@ -167,7 +187,7 @@ ${
 }${hasPage ? "- Pesan terakhir pengguna diawali [Konteks] berisi keadaan terbaru halaman di editor; itu yang berlaku, bukan versi di pesan lama." : "- Tidak ada halaman yang sedang dibuka. Untuk tulisan baru, gunakan propose_new_page."}
 
 ${WRITING_GUIDE}
-
+${style ? `\n${style}\n` : ""}
 ${COMPONENTS}${
     summary
       ? `
@@ -190,7 +210,8 @@ const seoParams = {
   },
 };
 
-function toolSpecs(hasPage: boolean): ToolSpec[] {
+/** Same tools whether or not a page is open, so the tool prefix stays cacheable. */
+function toolSpecs(): ToolSpec[] {
   const tools: ToolSpec[] = [
     {
       type: "function",
@@ -237,16 +258,36 @@ function toolSpecs(hasPage: boolean): ToolSpec[] {
       },
     },
   ];
-  if (hasPage) {
-    tools.push({
+  tools.push(
+    {
+      type: "function",
+      function: {
+        name: "audit_pages",
+        description:
+          "Temukan halaman terbit yang perlu diperbaiki, dengan datanya: jatuh tempo tinjauan, skor kualitas tulisan dan masalahnya, tautan rusak, lama tidak diubah.",
+        parameters: {
+          type: "object",
+          properties: {
+            focus: {
+              type: "string",
+              enum: [...AUDIT_FOCUS],
+              description: "all = paling bermasalah; review_due = lewat jadwal tinjauan; low_quality = skor tulisan rendah; broken_links = tautan rusak; stale = paling lama tidak diubah.",
+            },
+            limit: { type: "number", description: "Jumlah halaman, 1–25 (bawaan 12)." },
+          },
+        },
+      },
+    },
+    {
       type: "function",
       function: {
         name: "propose_page_edit",
         description:
-          "Usulkan perubahan pada halaman yang sedang dibuka. Isi hanya field yang ingin diubah. Pengguna menyetujui sebelum diterapkan.",
+          "Usulkan perubahan pada sebuah halaman. Tanpa slug: halaman yang sedang dibuka di editor. Isi hanya field yang ingin diubah. Pengguna melihat perbedaannya dan menyetujui sebelum diterapkan.",
         parameters: {
           type: "object",
           properties: {
+            slug: { type: "string", description: "Slug halaman yang diubah (mis. panduan/instalasi). Kosongkan untuk halaman yang sedang dibuka." },
             title: { type: "string" },
             description: { type: "string" },
             content: { type: "string", description: "Markdown untuk isi halaman, mengikuti Panduan menulis isi halaman." },
@@ -256,8 +297,8 @@ function toolSpecs(hasPage: boolean): ToolSpec[] {
           },
         },
       },
-    });
-  }
+    },
+  );
   return tools;
 }
 
@@ -273,6 +314,7 @@ const newPageArgs = z.object({
   publish_at: str(40).refine((v) => !v || !Number.isNaN(new Date(v).getTime()), "publish_at bukan tanggal ISO 8601 yang valid."),
 });
 const editArgs = z.object({
+  slug: str(200),
   title: str(200),
   description: str(500),
   content: z.string().max(MAX_CONTENT).optional(),
@@ -298,12 +340,19 @@ function navOutline(items: NavItemData[], titles: Map<string, string>, depth = 1
   });
 }
 
+/** The person chatting: audits and edits of other pages respect what they may edit. */
+export type AgentUser = { id: string; role: Role };
+
+/** Base text for the diff view, capped so stored chats stay small. */
+const BASE_MAX = 40_000;
+
 async function runTool(
   name: string,
   rawArgs: string,
   page: CurrentPage | null,
   external: ExternalTools,
   signal: AbortSignal,
+  user: AgentUser,
   truncated = false,
 ): Promise<{ result: string; proposal?: Proposal; label: string }> {
   let args: unknown;
@@ -394,15 +443,43 @@ async function runTool(
         label: `Menyiapkan “${a.title}”`,
       };
     }
+    case "audit_pages": {
+      const a = (args ?? {}) as { focus?: unknown; limit?: unknown };
+      const focus: AuditFocus = AUDIT_FOCUS.includes(a.focus as AuditFocus) ? (a.focus as AuditFocus) : "all";
+      const findings = await auditPages(user, focus, typeof a.limit === "number" ? a.limit : 12);
+      return {
+        result: findings.length ? JSON.stringify(findings) : "Tidak ada halaman bermasalah untuk fokus ini.",
+        label: `Mengaudit halaman (${focus}) · ${findings.length} temuan`,
+      };
+    }
     case "propose_page_edit": {
-      if (!page) return { result: "Tidak ada halaman yang sedang dibuka.", label: "Usulan perubahan" };
       const parsed = editArgs.safeParse(args);
       if (!parsed.success) return { result: `Usulan tidak valid: ${parsed.error.issues[0].message}`, label: "Usulan perubahan" };
       const a = parsed.data;
-      const mode = page.kind === "home" ? "append" : (a.content_mode ?? "replace");
+      const wanted = a.slug?.replace(/^\/?docs\//, "").replace(/\/+$/, "");
+      // Another page than the one open (or no page open): look it up and check the user may edit it.
+      let target: Proposal["target"];
+      let base = page?.markdown ?? "";
+      let kind = page?.kind ?? "doc";
+      if (wanted && wanted !== page?.slug) {
+        const [row] = await db
+          .select({ id: schema.pages.id, title: schema.pages.draftTitle, content: schema.pages.draftContent })
+          .from(schema.pages)
+          .where(and(eq(schema.pages.slug, wanted), eq(schema.pages.kind, "doc")));
+        if (!row) return { result: `Halaman dengan slug "${wanted}" tidak ditemukan.`, label: "Usulan perubahan" };
+        if (!(await canEditPage(user, row.id))) return { result: `Pengguna tidak boleh mengubah "${wanted}". Jangan usulkan perubahan untuk halaman ini.`, label: "Usulan perubahan" };
+        target = { id: row.id, slug: wanted, title: row.title || "Tanpa judul" };
+        base = toMarkdown(row.content);
+        kind = "doc";
+      } else if (!page) {
+        return { result: "Tidak ada halaman yang sedang dibuka. Sertakan slug halaman yang ingin diubah.", label: "Usulan perubahan" };
+      }
+      const mode = kind === "home" ? "append" : (a.content_mode ?? "replace");
       const proposal: Proposal = {
         id: randomUUID(),
         kind: "edit",
+        target,
+        baseMarkdown: a.content ? base.slice(0, BASE_MAX) : undefined,
         title: a.title,
         description: a.description,
         seo: cleanSeo(a.seo),
@@ -411,7 +488,11 @@ async function runTool(
         contentMarkdown: a.content,
         contentDoc: a.content ? mdxToDoc(a.content) : undefined,
       };
-      return { result: "Usulan perubahan sudah ditampilkan ke pengguna untuk disetujui.", proposal, label: "Menyiapkan perubahan" };
+      return {
+        result: "Usulan perubahan sudah ditampilkan ke pengguna untuk disetujui.",
+        proposal,
+        label: target ? `Menyiapkan perubahan “${target.title}”` : "Menyiapkan perubahan",
+      };
     }
     default:
       return { result: `Tool ${name} tidak dikenal.`, label: name };
@@ -427,6 +508,9 @@ export async function runAgent({
   summary = null,
   emit,
   signal,
+  user,
+  attachments = [],
+  style = "",
 }: {
   config: AiConfig;
   siteName: string;
@@ -435,18 +519,23 @@ export async function runAgent({
   summary?: string | null;
   emit: (event: AgentEvent) => void;
   signal: AbortSignal;
+  user: AgentUser;
+  /** Pages attached to the latest message with "@". */
+  attachments?: AttachedPage[];
+  /** The team's writing style (lib/ai/style.ts), part of the cacheable system prompt. */
+  style?: string;
 }) {
   // A broken MCP configuration must not break the chat: go on without those tools.
   const external = await externalAgentTools().catch((): ExternalTools => ({ specs: [], lookup: new Map() }));
   const latest = history.at(-1);
   const messages: AgentMessage[] = [
-    { role: "system", content: systemPrompt(siteName, Boolean(page), summary, external.specs.length > 0) },
+    { role: "system", content: systemPrompt(siteName, Boolean(page), summary, external.specs.length > 0, style) },
     ...history.slice(0, -1),
-    ...(latest ? [{ ...latest, content: pageContext(page, nowInJakarta()) + latest.content }] : []),
+    ...(latest ? [{ ...latest, content: pageContext(page, nowInJakarta(), attachments) + latest.content }] : []),
   ];
   let usage: Usage = { input: 0, cached: 0, output: 0 };
   const reportUsage = () => usage.input + usage.output > 0 && emit({ t: "usage", usage });
-  const tools = [...toolSpecs(Boolean(page)), ...external.specs];
+  const tools = [...toolSpecs(), ...external.specs];
   let thinking = false;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -519,7 +608,7 @@ export async function runAgent({
     for (const [index, call] of end.toolCalls.entries()) {
       // Only the last call can have been cut off by max_tokens.
       const cut = end.truncated && index === end.toolCalls.length - 1;
-      const { result, proposal, label } = await runTool(call.name, call.arguments, page, external, signal, cut);
+      const { result, proposal, label } = await runTool(call.name, call.arguments, page, external, signal, user, cut);
       emit({ t: "tool", label });
       if (proposal) emit({ t: "proposal", proposal });
       const draft = drafts.get(index);

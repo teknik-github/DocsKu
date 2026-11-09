@@ -61,15 +61,15 @@ export function usePageNotes(pageId: string, editor: Editor | null, activeId: st
 }
 
 /** Recomputed when the document changes (once per frame) or the title/description change. */
-function useQuality(editor: Editor, input: { title: string; description: string; seo: PageSeo; isHome: boolean }): QualityReport {
+function useQuality(editor: Editor, input: { title: string; description: string; seo: PageSeo; isHome: boolean; avoid: string[] }): QualityReport {
   const compute = () => checkQuality({ ...input, seoTitle: input.seo.title, seoDescription: input.seo.description, doc: editor.state.doc });
   const [report, setReport] = useState<QualityReport>(compute);
-  const { title, description, seo, isHome } = input;
+  const { title, description, seo, isHome, avoid } = input;
   useEffect(() => {
     let frame = 0;
     const run = () => {
       frame = 0;
-      setReport(checkQuality({ title, description, seoTitle: seo.title, seoDescription: seo.description, isHome, doc: editor.state.doc }));
+      setReport(checkQuality({ title, description, seoTitle: seo.title, seoDescription: seo.description, isHome, avoid, doc: editor.state.doc }));
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(run);
@@ -80,7 +80,7 @@ function useQuality(editor: Editor, input: { title: string; description: string;
       editor.off("update", schedule);
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [editor, title, description, seo, isHome]);
+  }, [editor, title, description, seo, isHome, avoid]);
   return report;
 }
 
@@ -111,6 +111,7 @@ export function ReviewPanel({
   description,
   seo,
   isHome,
+  avoid = [],
   pageId,
   viewer,
   canModerate,
@@ -128,6 +129,8 @@ export function ReviewPanel({
   description: string;
   seo: PageSeo;
   isHome: boolean;
+  /** Words the team avoids (Pengaturan → Gaya penulisan). */
+  avoid?: string[];
   pageId: string;
   viewer?: { id: string; name: string };
   /** Editors and admins may delete anyone's note. */
@@ -140,7 +143,7 @@ export function ReviewPanel({
   onActiveNote: (id: string | null) => void;
   onClose: () => void;
 }) {
-  const report = useQuality(editor, { title, description, seo, isHome });
+  const report = useQuality(editor, { title, description, seo, isHome, avoid });
   const counted = report.issues.filter((issue) => issue.level !== "info").length;
   return (
     <aside className="fixed top-14 right-0 bottom-0 z-30 flex w-full max-w-sm flex-col border-l border-line bg-page shadow-xl" data-testid="review-panel">

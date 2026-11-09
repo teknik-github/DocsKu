@@ -4,6 +4,8 @@ import { SEED_PAGES } from "../support/seed";
 test.describe("smarter search", () => {
   test("typos, synonyms, category filter, and the search → article click is counted", async ({ page, db }) => {
     await page.goto("/docs/pengenalan");
+    // Let the sidebar's prefetches finish: navigating while they stream aborts them, and React logs that as an error.
+    await page.waitForLoadState("networkidle");
     const dialog = page.getByRole("dialog");
     // Ctrl+K works once the page is hydrated; retry until the dialog opens.
     await expect(async () => {

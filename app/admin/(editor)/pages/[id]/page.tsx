@@ -9,6 +9,7 @@ import { PageEditor } from "@/components/admin/editor/page-editor";
 import { isAiReady } from "@/lib/ai/config";
 import { navigationForEditor, readAutomation } from "@/lib/automation";
 import { readingAdvicePrompt } from "@/lib/ai/insights";
+import { readWritingStyle } from "@/lib/ai/style-server";
 
 export const metadata = { title: "Edit halaman" };
 
@@ -68,6 +69,7 @@ async function EditorLoader({ params, searchParams }: Pick<PageProps<"/admin/pag
       viewer={{ id: user.id, name: user.name }}
       initialNote={initialNote}
       initialChat={initialChat ?? undefined}
+      styleAvoid={(await readWritingStyle()).avoid}
     />
   );
 }
