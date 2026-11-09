@@ -97,12 +97,51 @@ function normalize(node: MdNode): MdNode {
   return children ? { ...node, children } : node;
 }
 
+const KNOWN_TAG = new RegExp(`<\\/?(?:${[...BLOCK_TAGS, "Video"].join("|")})(?=[\\s/>])[^<>]*>`, "g");
+
+/**
+ * Escapes what MDX can't read outside our own component tags and code: a stray
+ * "<" (HTML, "a < b", leftovers like "</content>") or "{ }". Tried before giving
+ * up on MDX, so one bad character doesn't cost the page its Steps, Cards or FAQ.
+ */
+export function escapeStrayMdx(source: string): string {
+  let fence: string | null = null;
+  return source
+    .split("\n")
+    .map((line) => {
+      const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1];
+      if (marker) {
+        fence = fence ? (marker[0] === fence[0] && marker.length >= fence.length ? null : fence) : marker;
+        return line;
+      }
+      if (fence) return line;
+      return line
+        .split(/(`+[^`]*`+)/)
+        .map((part, i) => {
+          if (i % 2 === 1) return part;
+          const tags: string[] = [];
+          const masked = part.replace(KNOWN_TAG, (tag) => {
+            tags.push(tag);
+            return `\u0000${tags.length - 1}\u0000`;
+          });
+          return masked.replace(/[<{}]/g, (char) => `\\${char}`).replace(/\u0000(\d+)\u0000/g, (_, n: string) => tags[Number(n)]);
+        })
+        .join("");
+    })
+    .join("\n");
+}
+
 export function mdxToDoc(source: string): JSONContent {
   let parsed: MdNode;
   try {
     parsed = parser.parse(source) as MdNode;
   } catch {
-    parsed = markdownParser.parse(source) as MdNode;
+    try {
+      parsed = parser.parse(escapeStrayMdx(source)) as MdNode;
+    } catch {
+      // Still not MDX (e.g. an unclosed component): plain Markdown, components are lost.
+      parsed = markdownParser.parse(source) as MdNode;
+    }
   }
   const tree = normalize(parsed);
   const content = flow(tree.children);

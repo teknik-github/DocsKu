@@ -15,6 +15,8 @@ export type EmailEventInfo = {
   /** Roles that may switch it at all in Profil. */
   visibleTo: Role[];
   defaultOn: boolean;
+  /** Also available as a personal Telegram message (for people who linked the bot). */
+  telegram?: boolean;
 };
 
 export const EMAIL_EVENTS: EmailEventInfo[] = [
@@ -25,6 +27,7 @@ export const EMAIL_EVENTS: EmailEventInfo[] = [
     roles: ["admin", "editor"],
     visibleTo: ["admin", "editor", "contributor"],
     defaultOn: true,
+    telegram: true,
   },
   {
     key: "feedback.new",
@@ -33,6 +36,7 @@ export const EMAIL_EVENTS: EmailEventInfo[] = [
     roles: ["admin"],
     visibleTo: ["admin", "editor", "contributor"],
     defaultOn: true,
+    telegram: true,
   },
   {
     key: "page.submitted",
@@ -41,6 +45,7 @@ export const EMAIL_EVENTS: EmailEventInfo[] = [
     roles: ["admin", "editor"],
     visibleTo: ["admin", "editor"],
     defaultOn: true,
+    telegram: true,
   },
   {
     key: "page.approved",
@@ -49,6 +54,7 @@ export const EMAIL_EVENTS: EmailEventInfo[] = [
     roles: [],
     visibleTo: ["admin", "editor", "contributor"],
     defaultOn: true,
+    telegram: true,
   },
   {
     key: "page.changes_requested",
@@ -57,6 +63,7 @@ export const EMAIL_EVENTS: EmailEventInfo[] = [
     roles: [],
     visibleTo: ["admin", "editor", "contributor"],
     defaultOn: true,
+    telegram: true,
   },
   {
     key: "note.new",
@@ -65,6 +72,7 @@ export const EMAIL_EVENTS: EmailEventInfo[] = [
     roles: [],
     visibleTo: ["admin", "editor", "contributor"],
     defaultOn: true,
+    telegram: true,
   },
   {
     key: "links.broken",
@@ -81,6 +89,7 @@ export const EMAIL_EVENTS: EmailEventInfo[] = [
     roles: ["admin", "editor", "contributor"],
     visibleTo: ["admin", "editor", "contributor"],
     defaultOn: false,
+    telegram: true,
   },
   {
     key: "digest.weekly",
@@ -94,6 +103,13 @@ export const EMAIL_EVENTS: EmailEventInfo[] = [
 
 export function prefOn(prefs: Record<string, boolean> | null | undefined, key: EmailEventKey): boolean {
   const stored = prefs?.[key];
+  if (typeof stored === "boolean") return stored;
+  return EMAIL_EVENTS.find((e) => e.key === key)?.defaultOn ?? false;
+}
+
+/** Telegram preferences live next to the email ones as "tg:<event>"; same defaults. */
+export function telegramPrefOn(prefs: Record<string, boolean> | null | undefined, key: EmailEventKey): boolean {
+  const stored = prefs?.[`tg:${key}`];
   if (typeof stored === "boolean") return stored;
   return EMAIL_EVENTS.find((e) => e.key === key)?.defaultOn ?? false;
 }

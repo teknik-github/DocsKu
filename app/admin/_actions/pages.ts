@@ -11,7 +11,8 @@ import { canEditPage, editablePageIds, NO_PAGE_ACCESS } from "@/lib/auth/page-ac
 import { logActivity, pageLabel, pageLabels } from "@/lib/activity";
 import { EMPTY_DOC } from "@/lib/content/doc";
 import { PLACEHOLDER_SLUG, slugify, uniqueSlug } from "@/lib/slug";
-import { NO_NAV, readNavigation, resolveSection, writeNavigation } from "@/lib/automation";
+import { NO_NAV, ensureSection, readNavigation, resolveSection, writeNavigation } from "@/lib/automation";
+import { excerpt } from "@/lib/text-excerpt";
 import { findCategory, placePages } from "@/lib/categories";
 import { forgetRedirects, recordSlugChange } from "@/lib/redirects";
 import { forgetRouteExistence } from "@/lib/route-exists";
@@ -399,6 +400,31 @@ const aiDraftSchema = markdownPageSchema.extend({
   mode: z.enum(["draft", "publish", "schedule"]).default("draft"),
 });
 
+const clip = (text: string, max: number) => {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max - 1);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max - 20))}…`;
+};
+
+/**
+ * Description and SEO from the proposal itself (title, description, the opening of
+ * the content), and a "Tab › Section" the agent named created right away.
+ */
+async function withLocalMeta(input: z.output<typeof aiDraftSchema>): Promise<z.output<typeof aiDraftSchema>> {
+  const description = input.description || clip(excerpt(input.content, 400), 160);
+  const seo = {
+    title: input.seo?.title || clip(input.title, 60),
+    description: input.seo?.description || clip(description || excerpt(input.content, 400), 160),
+  };
+  let section = input.section;
+  if (section && !(await resolveSection(section))) {
+    const [tab, title] = section.split(/\s*›\s*/);
+    if (tab && title) section = await ensureSection(tab, title);
+  }
+  return { ...input, description, seo, section };
+}
+
 /**
  * Creates a draft page from an AI Chat proposal, and publishes or schedules it
  * when the user chose that. The Markdown is converted here, not trusted from the client.
@@ -418,7 +444,10 @@ export async function createDraftFromProposal(
     if (when.getTime() <= Date.now() + 30_000) return { ok: false, error: "Tanggal jadwal sudah lewat. Pilih Buat draf lalu jadwalkan dari editor." };
   }
 
-  const page = await createPageFromMarkdown(parsed.data, user.id, "ai");
+  // Publishing straight from AI: fill what automation would otherwise ask the AI for again
+  // (one more model round trip, up to 15 s), from what the proposal already has.
+  const prepared = mode === "draft" ? parsed.data : await withLocalMeta(parsed.data);
+  const page = await createPageFromMarkdown(prepared, user.id, "ai");
   await logActivity({ user, action: "page.create", target: { type: "page", id: page.id, label: parsed.data.title }, meta: { via: "ai" } });
   if (mode === "draft") return { ok: true, id: page.id, slug: page.slug, status: "draft" };
 

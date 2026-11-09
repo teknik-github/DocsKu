@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import type { AiConfig } from "@/lib/ai/config";
 import { addUsage, streamAgentTurn, type AgentMessage, type AgentPart, type ToolSpec, type Usage } from "@/lib/ai/client";
+import { repairToolArgs } from "@/lib/ai/tool-leak";
 import { mdxToDoc } from "@/lib/content/mdx-to-doc";
 import { toMarkdown } from "@/lib/content/markdown";
 import type { NavigationData, NavItemData, PageSeo } from "@/lib/site-types";
@@ -422,7 +423,7 @@ async function runTool(
       return { result: lines.join("\n") || "Navigasi masih kosong.", label: "Melihat struktur situs" };
     }
     case "propose_new_page": {
-      const parsed = newPageArgs.safeParse(args);
+      const parsed = newPageArgs.safeParse(repairToolArgs(args));
       if (!parsed.success) return { result: `Usulan tidak valid: ${parsed.error.issues[0].message}`, label: "Usulan halaman baru" };
       const a = parsed.data;
       const proposal: Proposal = {
@@ -453,7 +454,7 @@ async function runTool(
       };
     }
     case "propose_page_edit": {
-      const parsed = editArgs.safeParse(args);
+      const parsed = editArgs.safeParse(repairToolArgs(args));
       if (!parsed.success) return { result: `Usulan tidak valid: ${parsed.error.issues[0].message}`, label: "Usulan perubahan" };
       const a = parsed.data;
       const wanted = a.slug?.replace(/^\/?docs\//, "").replace(/\/+$/, "");

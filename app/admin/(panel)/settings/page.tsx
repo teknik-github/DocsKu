@@ -33,6 +33,8 @@ import { WebhooksPanel } from "@/components/admin/webhooks-panel";
 import { emailReady, emailView, readEmailSettings } from "@/lib/notifications/settings";
 import { loadWebhooks, outboxStats } from "@/lib/notifications/admin";
 import { canEncrypt } from "@/lib/crypto";
+import { readTelegramSettings, telegramView } from "@/lib/telegram/settings";
+import { TelegramSettingsForm } from "@/components/admin/telegram-settings-form";
 import { sql } from "drizzle-orm";
 
 export const metadata = { title: "Pengaturan" };
@@ -40,7 +42,7 @@ export const metadata = { title: "Pengaturan" };
 export default function SettingsPage() {
   return (
     <>
-      <PageHeader title="Pengaturan" description="Identitas situs, AI, otomatisasi saat terbit, komentar, dan integrasi." />
+      <PageHeader title="Pengaturan" description="Identitas situs, AI, otomatisasi saat terbit, komentar, notifikasi, Telegram, dan integrasi." />
       <Suspense fallback={<div className="h-96 animate-pulse rounded-xl bg-fill" />}>
         <Settings />
       </Suspense>
@@ -99,7 +101,12 @@ async function Settings() {
     db.execute<{ locale: string; n: number }>(sql`select locale, count(*)::int as n from pages where translation_of is not null group by locale`),
   ]);
   const [email, outbox, webhookData] = await Promise.all([readEmailSettings(), outboxStats(), loadWebhooks()]);
-  const [style, glossary] = await Promise.all([readWritingStyle(), getGlossary()]);
+  const [style, glossary, telegram, [telegramLinks]] = await Promise.all([
+    readWritingStyle(),
+    getGlossary(),
+    readTelegramSettings(),
+    db.execute<{ n: number }>(sql`select count(*)::int as n from telegram_links where chat_id is not null`),
+  ]);
   const styleRules = [style.voice, style.rules].filter((text) => text.trim()).length + (style.avoid.length ? 1 : 0);
   const automationOn = (["navigation", "slug", "description", "seo", "cover"] as const).filter((key) => automation[key]).length;
 
@@ -152,6 +159,11 @@ async function Settings() {
       status: webhookData.hooks.some((h) => h.enabled) ? { text: `${webhookData.hooks.filter((h) => h.enabled).length} aktif`, tone: "on" } : { text: "Belum ada", tone: "off" },
     },
     {
+      id: "telegram",
+      label: "Telegram",
+      status: telegram.enabled && telegram.botUsername ? { text: `@${telegram.botUsername} · ${telegramLinks?.n ?? 0} akun`, tone: "on" } : { text: telegram.token ? "Mati" : "Belum diatur", tone: "off" },
+    },
+    {
       id: "widget",
       label: "Widget bantuan",
       status: widget.enabled
@@ -200,6 +212,9 @@ async function Settings() {
         </Section>
         <Section id="webhook">
           <WebhooksPanel hooks={webhookData.hooks} deliveries={webhookData.deliveries} canEncrypt={canEncrypt()} />
+        </Section>
+        <Section id="telegram">
+          <TelegramSettingsForm initial={telegramView(telegram)} canEncrypt={canEncrypt()} linkedCount={telegramLinks?.n ?? 0} />
         </Section>
         <Section id="widget">
           <WidgetSettingsForm initial={widget} siteUrl={process.env.SITE_URL?.replace(/\/+$/, "") || null} themeAccent={themeAccent} askAiAvailable={askAiAvailable} />

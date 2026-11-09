@@ -9,6 +9,8 @@ import path from "node:path";
 export const ROOT = path.resolve(__dirname, "../../..");
 export const PORT = Number(process.env.E2E_PORT || 3019);
 export const BASE_URL = `http://127.0.0.1:${PORT}`;
+/** The fake Telegram Bot API that site/telegram.spec.ts starts (the app gets it as TELEGRAM_API_URL). */
+export const TELEGRAM_PORT = Number(process.env.E2E_TELEGRAM_PORT || PORT + 10);
 export const DIST_DIR = ".next-e2e";
 export const STATE_DIR = path.join(ROOT, "tests/e2e/.state");
 export const STATE_FILE = path.join(STATE_DIR, "state.json");

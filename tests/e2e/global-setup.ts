@@ -7,7 +7,7 @@ import { chromium } from "@playwright/test";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import { BASE_URL, DIST_DIR, PORT, ROOT, STATE_DIR, STATE_FILE, maintenanceUrl, testDatabaseUrl, type E2EState } from "./support/env";
+import { BASE_URL, DIST_DIR, PORT, ROOT, STATE_DIR, STATE_FILE, TELEGRAM_PORT, maintenanceUrl, testDatabaseUrl, type E2EState } from "./support/env";
 import { seed } from "./support/seed";
 
 /**
@@ -66,6 +66,8 @@ export default async function globalSetup() {
     DISABLE_SCHEDULER: "",
     // Lets custom webhooks reach the spec's local receiver (off in real deployments).
     WEBHOOK_ALLOW_PRIVATE: "1",
+    // The Telegram bot talks to the spec's fake Bot API, never to api.telegram.org.
+    TELEGRAM_API_URL: `http://127.0.0.1:${TELEGRAM_PORT}`,
   };
 
   const next = path.join(ROOT, "node_modules/.bin/next");

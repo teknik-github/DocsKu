@@ -126,6 +126,8 @@ const TEXT: Record<string, (m: Meta) => ActivityText> = {
   "webhook.create": () => ({ verb: "menambahkan webhook" }),
   "webhook.update": () => ({ verb: "memperbarui webhook" }),
   "webhook.delete": () => ({ verb: "menghapus webhook", tone: "danger" }),
+  "telegram.link": (m) => ({ verb: m.username ? `menghubungkan akunnya ke Telegram (@${str(m.username)})` : "menghubungkan akunnya ke Telegram", noTarget: true }),
+  "telegram.unlink": () => ({ verb: "memutus akunnya dari Telegram", noTarget: true }),
 
   "auth.login": (m) => ({ verb: m.method === "recovery" ? "masuk dengan kode pemulihan" : "masuk", noTarget: true, tone: m.method === "recovery" ? "warn" : undefined }),
   "auth.logout": () => ({ verb: "keluar", noTarget: true }),

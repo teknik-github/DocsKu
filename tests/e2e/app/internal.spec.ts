@@ -5,13 +5,17 @@ const internal = `/docs/${SEED_PAGES.internal.slug}`;
 
 test.describe("internal articles", () => {
   test("a visitor gets the same 404 for an internal article as for a missing page", async ({ request }) => {
-    const hidden = await request.get(internal);
-    const missing = await request.get("/docs/tim/tidak-pernah-ada");
-    expect(hidden.status()).toBe(404);
-    expect(missing.status()).toBe(404);
     const strip = (html: string) => html.replace(/\/tim\/[a-z-]+/g, "");
-    expect(strip(await hidden.text())).toBe(strip(await missing.text()));
-    expect(await hidden.text()).not.toContain("Wi-Fi");
+    // The 404 embeds the public search index: parallel specs publishing pages between the two
+    // requests change it, so compare again until both come from the same moment.
+    await expect(async () => {
+      const [hidden, missing] = await Promise.all([request.get(internal), request.get("/docs/tim/tidak-pernah-ada")]);
+      expect(hidden.status()).toBe(404);
+      expect(missing.status()).toBe(404);
+      const hiddenText = await hidden.text();
+      expect(hiddenText).not.toContain("Wi-Fi");
+      expect(strip(hiddenText)).toBe(strip(await missing.text()));
+    }).toPass({ timeout: 20_000 });
   });
 
   test("it never reaches the public search index, sitemap or llms.txt", async ({ request }) => {

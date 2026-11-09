@@ -10,6 +10,8 @@ import { siteName, teamWithPrefs } from "@/lib/notifications/dispatch";
 import { emailReady, readEmailSettings, siteOrigin, smtpPassword, type StoredEmailSettings } from "@/lib/notifications/settings";
 import { renderEmail } from "@/lib/notifications/templates";
 import { buildRequest, post, type DeliveryPayload } from "@/lib/notifications/webhooks";
+import { sendHtml, TelegramError, type InlineKeyboard } from "@/lib/telegram/api";
+import { telegramReady } from "@/lib/telegram/settings";
 
 /**
  * Delivery, run from the scheduler tick (/api/internal/publish-scheduled):
@@ -88,6 +90,49 @@ async function sendEmails(deadline: number) {
         .update(schema.emailOutbox)
         .set(attempts >= MAX_ATTEMPTS ? { status: "failed", attempts, lastError: message } : { status: "pending", attempts, lastError: message, nextAttemptAt: retryAt(attempts) })
         .where(eq(schema.emailOutbox.id, row.id));
+      failed++;
+    }
+  }
+  return { sent, failed };
+}
+
+/* ------------------------------------------------------------- telegram -- */
+
+/** Personal Telegram messages (lib/notifications/dispatch.ts queues them for people who linked the bot). */
+async function sendTelegram(deadline: number) {
+  const ready = await telegramReady();
+  if (!ready) {
+    await db.execute(sql`update telegram_outbox set status = 'failed', last_error = 'Bot Telegram dimatikan' where status = 'pending' and created_at < now() - interval '7 days'`);
+    return { sent: 0, failed: 0 };
+  }
+  const rows = await db.execute<{ id: string; chat_id: string; text: string; reply_markup: InlineKeyboard | null; attempts: number }>(sql`
+    update telegram_outbox set status = 'sending', next_attempt_at = now()
+    where id in (
+      select id from telegram_outbox
+      where (status = 'pending' and next_attempt_at <= now()) or (status = 'sending' and next_attempt_at < now() - interval '10 minutes')
+      order by created_at limit ${BATCH} for update skip locked)
+    returning id, chat_id, text, reply_markup, attempts`);
+  let sent = 0;
+  let failed = 0;
+  for (const [index, row] of [...rows].entries()) {
+    if (Date.now() > deadline) {
+      const rest = [...rows].slice(index).map((r) => r.id);
+      await db.update(schema.telegramOutbox).set({ status: "pending" }).where(inArray(schema.telegramOutbox.id, rest));
+      break;
+    }
+    try {
+      await sendHtml(ready.token, row.chat_id, row.text, row.reply_markup ?? undefined);
+      await db.update(schema.telegramOutbox).set({ status: "sent", sentAt: sql`now()`, attempts: row.attempts + 1, lastError: null }).where(eq(schema.telegramOutbox.id, row.id));
+      sent++;
+    } catch (error) {
+      const attempts = row.attempts + 1;
+      const message = (error instanceof Error ? error.message : String(error)).slice(0, 300);
+      // 400/403: the chat is gone or blocked the bot; retrying won't help.
+      const final = attempts >= MAX_ATTEMPTS || (error instanceof TelegramError && (error.code === 400 || error.code === 403));
+      await db
+        .update(schema.telegramOutbox)
+        .set(final ? { status: "failed", attempts, lastError: message } : { status: "pending", attempts, lastError: message, nextAttemptAt: retryAt(attempts) })
+        .where(eq(schema.telegramOutbox.id, row.id));
       failed++;
     }
   }
@@ -267,18 +312,22 @@ async function prune() {
   cache.__docskuNotifyPrunedAt = now;
   await db.execute(sql`delete from email_outbox where status in ('sent', 'failed') and created_at < now() - interval '30 days'`);
   await db.execute(sql`delete from webhook_deliveries where status in ('delivered', 'failed', 'skipped') and created_at < now() - interval '30 days'`);
+  await db.execute(sql`delete from telegram_outbox where status in ('sent', 'failed') and created_at < now() - interval '30 days'`);
+  await db.execute(sql`delete from telegram_actions where created_at < now() - interval '30 days'`);
 }
 
 /** One scheduler tick's worth of notification work. Never throws. */
 export async function runNotifications() {
   const deadline = Date.now() + TICK_BUDGET_MS;
-  const result = { sent: 0, failed: 0, delivered: 0, hookFailed: 0, digests: 0 };
+  const result = { sent: 0, failed: 0, telegram: 0, delivered: 0, hookFailed: 0, digests: 0 };
   try {
     result.digests = await sendWeeklyDigest();
     await dailySearchMisses();
     const email = await sendEmails(deadline);
     result.sent = email.sent;
     result.failed = email.failed;
+    const telegram = await sendTelegram(deadline);
+    result.telegram = telegram.sent;
     const hooks = await sendWebhooks(deadline);
     result.delivered = hooks.delivered;
     result.hookFailed = hooks.failed;

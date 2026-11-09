@@ -92,8 +92,11 @@ export function AiChat({
   onApplyEdit,
   onClose,
   initialInput,
+  initialConversationId,
 }: {
   enabled: boolean;
+  /** A chat to open first (`/admin/ai?c=<id>`, e.g. from a Telegram button). */
+  initialConversationId?: string;
   /** Text to start the message box with (e.g. "Tulis" from Statistik); never sent on its own. */
   initialInput?: string;
   /** "panel" sits beside the editor; "page" is the full AI Chat screen with a history column. */
@@ -172,7 +175,8 @@ export function AiChat({
     });
     void listConversations(pageId ?? null).then(async (list) => {
       setConversations(list);
-      if (pageId && list[0]) await open(list[0].id);
+      if (initialConversationId) await open(initialConversationId);
+      else if (pageId && list[0]) await open(list[0].id);
     });
     return () => abort.current?.abort();
     // Runs once per mounted chat.

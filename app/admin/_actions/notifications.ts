@@ -91,11 +91,12 @@ export async function sendTestEmail(): Promise<Result<string>> {
   return { ok: true, value: user.email };
 }
 
-/** Profil → Notifikasi email: the person's own switches. */
+/** Profil → Notifikasi: the person's own switches (email keys, and "tg:<key>" for Telegram). */
 export async function saveNotificationPrefs(input: Record<string, boolean>): Promise<Result> {
-  const user = await authorize();
+  const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
-  const allowed = EMAIL_EVENTS.filter((e) => e.visibleTo.includes(user.role)).map((e) => e.key as string);
+  const visible = EMAIL_EVENTS.filter((e) => e.visibleTo.includes(user.role));
+  const allowed = [...visible.map((e) => e.key as string), ...visible.filter((e) => e.telegram).map((e) => `tg:${e.key}`)];
   const prefs = Object.fromEntries(Object.entries(input ?? {}).filter(([key, value]) => allowed.includes(key) && typeof value === "boolean"));
   await db.update(schema.users).set({ notificationPrefs: prefs }).where(eq(schema.users.id, user.id));
   return { ok: true };

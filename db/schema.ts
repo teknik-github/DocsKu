@@ -221,6 +221,8 @@ export const aiConversations = pgTable(
     compactedCount: integer("compacted_count").notNull().default(0),
     /** Kept at the top of the history list. */
     pinned: boolean("pinned").notNull().default(false),
+    /** Where the chat happens: "web" (AI Chat) or "telegram" (the bot). */
+    source: text("source").notNull().default("web"),
     ...timestamps,
   },
   (t) => [index("ai_conversations_user_idx").on(t.userId, t.updatedAt)],
@@ -453,6 +455,59 @@ export const emailOutbox = pgTable(
   },
   (t) => [index("email_outbox_due_idx").on(t.status, t.nextAttemptAt)],
 );
+
+/**
+ * A person's Telegram chat with the site's bot (lib/telegram/). Linking: Profil
+ * shows a one-time code (only its SHA-256 is kept, 10 minutes), the person sends
+ * "/start <code>" to the bot, and the chat id is stored. `conversationId` is the
+ * AI Chat conversation the bot continues.
+ */
+export const telegramLinks = pgTable("telegram_links", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  chatId: text("chat_id").unique(),
+  username: text("username"),
+  codeHash: text("code_hash"),
+  codeExpiresAt: timestamp("code_expires_at", { withTimezone: true }),
+  linkedAt: timestamp("linked_at", { withTimezone: true }),
+  conversationId: uuid("conversation_id").references(() => aiConversations.id, { onDelete: "set null" }),
+  ...timestamps,
+});
+
+/** Personal Telegram messages waiting to be sent by the scheduler tick (like email_outbox). */
+export const telegramOutbox = pgTable(
+  "telegram_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    chatId: text("chat_id").notNull(),
+    /** Telegram HTML. */
+    text: text("text").notNull(),
+    replyMarkup: jsonb("reply_markup").$type<Record<string, unknown>>(),
+    event: text("event").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("telegram_outbox_due_idx").on(t.status, t.nextAttemptAt)],
+);
+
+/**
+ * What a Telegram button does (callback data is limited to 64 bytes, so a button
+ * carries only this row's short id). Only the person it was made for may use it.
+ */
+export const telegramActions = pgTable("telegram_actions", {
+  id: text("id").primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Outgoing webhooks (Slack, Discord, Telegram or a custom URL). The URL/token is AES-GCM encrypted. */
 export const webhooks = pgTable("webhooks", {

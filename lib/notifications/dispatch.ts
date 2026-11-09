@@ -1,10 +1,14 @@
 import "server-only";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { NotifyEvent } from "@/lib/notify";
-import { prefOn, type EmailEventKey } from "@/lib/notifications/catalog";
+import { prefOn, telegramPrefOn, type EmailEventKey } from "@/lib/notifications/catalog";
+import type { Role } from "@/db/schema";
+import { can } from "@/lib/auth/permissions";
+import { telegramReady } from "@/lib/telegram/settings";
+import { esc, link } from "@/lib/telegram/format";
 import { emailReady, readEmailSettings, rememberOrigin, siteOrigin } from "@/lib/notifications/settings";
-import { eventEmail } from "@/lib/notifications/templates";
+import { eventEmail, eventSummary } from "@/lib/notifications/templates";
 import type { DeliveryPayload } from "@/lib/notifications/webhooks";
 
 /**
@@ -59,13 +63,17 @@ async function commentPageId(commentId: string): Promise<string | null> {
 }
 
 /** Who gets an email for this event (before the actor is removed). */
-async function emailRecipients(event: NotifyEvent, people: Recipient[]): Promise<{ key: EmailEventKey; ids: Set<string> } | null> {
+async function recipients(
+  event: NotifyEvent,
+  people: Recipient[],
+  on: (prefs: Record<string, boolean>, key: EmailEventKey) => boolean = prefOn,
+): Promise<{ key: EmailEventKey; ids: Set<string> } | null> {
   const ids = new Set<string>();
-  const byRole = (key: EmailEventKey, roles: string[]) => people.filter((p) => roles.includes(p.role) && prefOn(p.prefs, key)).forEach((p) => ids.add(p.id));
+  const byRole = (key: EmailEventKey, roles: string[]) => people.filter((p) => roles.includes(p.role) && on(p.prefs, key)).forEach((p) => ids.add(p.id));
   const personal = (key: EmailEventKey, list: (string | null | undefined)[]) =>
     list.forEach((id) => {
       const p = id ? people.find((x) => x.id === id) : undefined;
-      if (p && prefOn(p.prefs, key)) ids.add(p.id);
+      if (p && on(p.prefs, key)) ids.add(p.id);
     });
 
   switch (event.type) {
@@ -109,7 +117,8 @@ export async function dispatch(event: NotifyEvent): Promise<void> {
     readEmailSettings(),
   ]);
   const wantsEmail = emailReady(settings) && event.type !== "search.misses";
-  if (!hooks.length && !wantsEmail) return;
+  const wantsTelegram = event.type !== "search.misses" && event.type !== "links.broken" && Boolean(await telegramReady());
+  if (!hooks.length && !wantsEmail && !wantsTelegram) return;
 
   const [name, origin] = await Promise.all([siteName(), siteOrigin()]);
 
@@ -118,18 +127,43 @@ export async function dispatch(event: NotifyEvent): Promise<void> {
     await db.insert(schema.webhookDeliveries).values(hooks.map((hook) => ({ webhookId: hook.id, event: event.type, payload: payload as unknown as Record<string, unknown> })));
   }
 
+  if (wantsTelegram) await queueTelegram(event, await team(), origin);
+
   if (wantsEmail) {
     const people = await team();
-    const target = await emailRecipients(event, people);
+    const target = await recipients(event, people);
     if (!target) return;
     if (event.actorId) target.ids.delete(event.actorId);
     const content = eventEmail(event, name, origin);
     if (!content || !target.ids.size) return;
-    const recipients = people.filter((p) => target.ids.has(p.id) && p.email);
-    if (!recipients.length) return;
+    const to = people.filter((p) => target.ids.has(p.id) && p.email);
+    if (!to.length) return;
     await db.insert(schema.emailOutbox).values(
-      recipients.map((p) => ({ to: p.email, subject: content.subject, text: content.text, html: content.html, event: event.type })),
+      to.map((p) => ({ to: p.email, subject: content.subject, text: content.text, html: content.html, event: event.type })),
     );
+  }
+}
+
+/** Personal Telegram messages for people who linked the bot and want this event there. */
+async function queueTelegram(event: NotifyEvent, people: Recipient[], origin: string) {
+  const target = await recipients(event, people, telegramPrefOn);
+  if (!target) return;
+  if (event.actorId) target.ids.delete(event.actorId);
+  if (!target.ids.size) return;
+  const links = await db
+    .select({ userId: schema.telegramLinks.userId, chatId: schema.telegramLinks.chatId })
+    .from(schema.telegramLinks)
+    .where(and(inArray(schema.telegramLinks.userId, [...target.ids]), isNotNull(schema.telegramLinks.chatId)));
+  if (!links.length) return;
+  const summary = eventSummary(event);
+  const html = `<b>${esc(summary.title)}</b>\n${esc(summary.text)}${summary.url ? `\n${link(summary.url, "Buka", origin)}` : ""}`.slice(0, 3800);
+  const { commentButtons } = await import("@/lib/telegram/bot");
+  for (const row of links) {
+    const person = people.find((p) => p.id === row.userId);
+    // Pending comments can be moderated right from the message.
+    const markup =
+      event.type === "comment.new" && event.pending && person && can(person.role as Role, "comments.moderate") ? await commentButtons(row.userId, event.commentId) : null;
+    await db.insert(schema.telegramOutbox).values({ chatId: row.chatId!, text: html, replyMarkup: markup, event: event.type });
   }
 }
 

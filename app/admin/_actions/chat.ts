@@ -8,13 +8,12 @@ import { authorize } from "@/lib/auth/dal";
 import { getAiConfig } from "@/lib/ai/config";
 import { AiError, listModels } from "@/lib/ai/client";
 import { AI_PRESETS } from "@/lib/ai/presets";
-import type { ChatMessage, Conversation, ConversationListItem, ProposalState } from "@/lib/ai/chat-types";
+import type { Conversation, ConversationListItem, ProposalState } from "@/lib/ai/chat-types";
 import { MODEL_PATTERN, compactIfNeeded, getOwnedConversation } from "@/lib/ai/conversations";
 import { can } from "@/lib/auth/permissions";
-import { canEditPage, editablePageIds } from "@/lib/auth/page-access";
+import { editablePageIds } from "@/lib/auth/page-access";
+import { applyEditProposal, recordProposal } from "@/lib/ai/proposal-actions";
 import { mdxToDoc } from "@/lib/content/mdx-to-doc";
-import { addRevision, draftSchema, saveWorkingCopy } from "@/lib/pages/service";
-import { logActivity } from "@/lib/activity";
 
 const isId = (id: unknown): id is string => z.uuid().safeParse(id).success;
 const owned = (id: string, userId: string) =>
@@ -37,6 +36,7 @@ export async function listConversations(pageId?: string | null): Promise<Convers
       pageTitle: schema.pages.draftTitle,
       updatedAt: schema.aiConversations.updatedAt,
       pinned: schema.aiConversations.pinned,
+      source: schema.aiConversations.source,
       messageCount: sql<number>`jsonb_array_length(${schema.aiConversations.messages})`,
     })
     .from(schema.aiConversations)
@@ -86,25 +86,13 @@ export async function updateProposal(
 ) {
   const user = await authorize("any");
   if ("error" in user || !isId(conversationId)) return { ok: false as const };
-  const conversation = await getOwnedConversation(conversationId, user.id);
-  if (!conversation) return { ok: false as const };
   const clean = {
     status: patch.status === "applied" || patch.status === "dismissed" ? patch.status : undefined,
     draftId: isId(patch.draftId) ? patch.draftId : undefined,
     pageStatus: patch.pageStatus === "draft" || patch.pageStatus === "published" || patch.pageStatus === "scheduled" ? patch.pageStatus : undefined,
     error: typeof patch.error === "string" ? patch.error.slice(0, 300) : undefined,
   };
-  const messages: ChatMessage[] = conversation.messages.map((m) =>
-    m.role === "assistant" && m.id === messageId
-      ? { ...m, proposals: m.proposals.map((p) => (p.id === proposalId ? { ...p, ...clean } : p)) }
-      : m,
-  );
-  // Keep the chat's position in the history list: this isn't new activity.
-  await db
-    .update(schema.aiConversations)
-    .set({ messages, updatedAt: sql`${schema.aiConversations.updatedAt}` })
-    .where(owned(conversationId, user.id));
-  return { ok: true as const };
+  return { ok: await recordProposal(user.id, conversationId, String(messageId), String(proposalId), clean) };
 }
 
 /** Summarises the older part of a chat now, instead of waiting for it to grow. */
@@ -193,9 +181,8 @@ export async function convertProposalMarkdown(markdown: string): Promise<JSONCon
 
 /**
  * Applies an edit proposal for a page other than the one open in the editor (audits, /admin/ai):
- * the stored proposal (never the client's copy) goes into that page's working copy, after
- * keeping the current one as an "ai-edit" revision. `contentMarkdown` replaces the proposed
- * body when the person applied only some sections. Nothing is published.
+ * the stored proposal (never the client's copy) goes into that page's working copy
+ * (lib/ai/proposal-actions.ts). Nothing is published.
  */
 export async function applyProposalToPage(
   conversationId: string,
@@ -206,35 +193,6 @@ export async function applyProposalToPage(
   const user = await authorize("any");
   if ("error" in user) return { ok: false, error: user.error };
   if (!isId(conversationId)) return { ok: false, error: "Percakapan tidak ditemukan." };
-  const conversation = await getOwnedConversation(conversationId, user.id);
-  const message = conversation?.messages.find((m) => m.id === messageId);
-  const proposal = message?.role === "assistant" ? message.proposals.find((p) => p.id === proposalId) : undefined;
-  if (!proposal || proposal.kind !== "edit" || !proposal.target) return { ok: false, error: "Usulan tidak ditemukan." };
-  if (proposal.status === "applied") return { ok: false, error: "Usulan ini sudah diterapkan." };
-  if (!(await canEditPage(user, proposal.target.id))) return { ok: false, error: "Anda tidak boleh mengubah halaman ini." };
-  const [page] = await db
-    .select({ title: schema.pages.draftTitle, description: schema.pages.draftDescription, content: schema.pages.draftContent, seo: schema.pages.draftSeo, cover: schema.pages.draftCoverImage })
-    .from(schema.pages)
-    .where(eq(schema.pages.id, proposal.target.id));
-  if (!page) return { ok: false, error: "Halaman sudah tidak ada." };
-
-  const markdown = typeof override?.contentMarkdown === "string" ? override.contentMarkdown.slice(0, 200_000) : proposal.contentMarkdown;
-  const body = markdown ? mdxToDoc(markdown) : null;
-  const content =
-    !body ? page.content : proposal.contentMode === "append" ? { ...page.content, content: [...(page.content.content ?? []), ...(body.content ?? [])] } : body;
-  const parsed = draftSchema.safeParse({
-    title: proposal.title ?? page.title,
-    description: proposal.description ?? page.description,
-    content,
-    seo: { ...page.seo, ...(proposal.seo ?? {}) },
-    cover: page.cover,
-  });
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  const before = draftSchema.parse({ title: page.title, description: page.description, content: page.content, seo: page.seo, cover: page.cover });
-  await addRevision(proposal.target.id, before, "ai-edit", user.id);
-  const saved = await saveWorkingCopy(proposal.target.id, parsed.data, user.id);
-  if (!saved.ok) return { ok: false, error: "error" in saved ? saved.error : "Halaman sedang diubah orang lain. Coba lagi." };
-  await logActivity({ user, action: "page.ai_edit", target: { type: "page", id: proposal.target.id, label: parsed.data.title }, meta: { via: "ai-chat" } });
-  await updateProposal(conversationId, messageId, proposalId, { status: "applied" });
-  return { ok: true };
+  const result = await applyEditProposal(user, conversationId, String(messageId), String(proposalId), override);
+  return result.ok ? { ok: true } : result;
 }

@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
-import { ArrowUpRight, Bell, ChevronRight, KeyRound, Mail, Plug, ShieldCheck, UserRound } from "lucide-react";
+import { ArrowUpRight, Bell, ChevronRight, KeyRound, Mail, Plug, Send, ShieldCheck, UserRound } from "lucide-react";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth/dal";
 import { ROLE_LABELS } from "@/lib/auth/permissions";
@@ -17,6 +17,8 @@ import { getSecuritySettings } from "@/lib/data/security";
 import { getAuthorPage } from "@/lib/data/authors";
 import { NotificationPrefs } from "@/components/admin/notification-prefs";
 import { emailReady, readEmailSettings } from "@/lib/notifications/settings";
+import { readTelegramSettings, telegramCredentials } from "@/lib/telegram/settings";
+import { TelegramLink } from "@/components/admin/telegram-link";
 
 export const metadata = { title: "Profil" };
 
@@ -25,6 +27,7 @@ const SECTIONS = [
   { id: "akun", label: "Akun", icon: Mail },
   { id: "keamanan", label: "Keamanan", icon: KeyRound },
   { id: "notifikasi", label: "Notifikasi", icon: Bell },
+  { id: "telegram", label: "Telegram", icon: Send },
   { id: "integrasi", label: "Integrasi", icon: Plug },
 ];
 
@@ -41,7 +44,7 @@ export default function ProfilePage({ searchParams }: PageProps<"/admin/profile"
 
 async function Profile({ searchParams }: Pick<PageProps<"/admin/profile">, "searchParams">) {
   const user = await requireUser();
-  const [status, site, security, params, [profile], h] = await Promise.all([
+  const [status, site, security, params, [profile], h, telegram, [tgLink]] = await Promise.all([
     twoFactorStatus(user.id),
     getSiteSettings(),
     getSecuritySettings(),
@@ -51,7 +54,14 @@ async function Profile({ searchParams }: Pick<PageProps<"/admin/profile">, "sear
       .from(schema.users)
       .where(eq(schema.users.id, user.id)),
     headers(),
+    readTelegramSettings(),
+    db
+      .select({ chatId: schema.telegramLinks.chatId, username: schema.telegramLinks.username, linkedAt: schema.telegramLinks.linkedAt })
+      .from(schema.telegramLinks)
+      .where(eq(schema.telegramLinks.userId, user.id)),
   ]);
+  const botEnabled = Boolean(telegramCredentials(telegram));
+  const telegramLinked = botEnabled && Boolean(tgLink?.chatId);
   const origin = process.env.SITE_URL?.replace(/\/+$/, "") || `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host")}`;
   const authorsOn = site.showAuthors !== false;
   // The author page exists once there is a username and at least one public article.
@@ -152,8 +162,27 @@ async function Profile({ searchParams }: Pick<PageProps<"/admin/profile">, "sear
           </div>
         </Section>
 
-        <Section id="notifikasi" title="Notifikasi email" description="Email yang Anda terima dari situs ini. Anda tidak pernah diberi tahu tentang tindakan Anda sendiri.">
-          <NotificationPrefs role={user.role} initial={profile?.notificationPrefs ?? {}} emailEnabled={emailReady(await readEmailSettings())} isAdmin={user.role === "admin"} />
+        <Section
+          id="notifikasi"
+          title="Notifikasi"
+          description={`Email${telegramLinked ? " dan pesan Telegram" : ""} yang Anda terima dari situs ini. Anda tidak pernah diberi tahu tentang tindakan Anda sendiri.`}
+        >
+          <NotificationPrefs
+            role={user.role}
+            initial={profile?.notificationPrefs ?? {}}
+            emailEnabled={emailReady(await readEmailSettings())}
+            isAdmin={user.role === "admin"}
+            telegram={telegramLinked}
+          />
+        </Section>
+
+        <Section id="telegram" title="Telegram" description="Pakai AI Chat, cari halaman, dan terima notifikasi dari HP lewat bot Telegram situs ini.">
+          <TelegramLink
+            botEnabled={botEnabled}
+            botUsername={telegram.botUsername}
+            isAdmin={user.role === "admin"}
+            initial={{ linked: telegramLinked, username: tgLink?.username ?? null, linkedAt: tgLink?.linkedAt?.toISOString() ?? null }}
+          />
         </Section>
 
         <section id="integrasi" className="scroll-mt-24">

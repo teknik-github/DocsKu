@@ -158,10 +158,11 @@ async function suggestMeta(
     need.section &&
       `"new_section" (hanya bila perlu): {"tab": nama tab${need.tabs.length ? ` (pakai yang ada bila cocok: ${need.tabs.join(", ")})` : ""}, "title": judul bagian baru, 1–3 kata, umum agar halaman lain sejenis bisa masuk}`,
   ].filter(Boolean);
-  const markdown = toMarkdown(draft.content).slice(0, 8_000);
+  // Metadata needs the gist, not the whole page; no thinking, so publishing doesn't wait on reasoning.
+  const markdown = toMarkdown(draft.content).slice(0, 4_000);
   try {
     const reply = await completeChat(
-      config,
+      { ...config, thinking: false },
       [
         {
           role: "system",
@@ -172,8 +173,8 @@ async function suggestMeta(
           content: `Judul: ${draft.title}\n${draft.description ? `Deskripsi: ${draft.description}\n` : ""}Isi (Markdown):\n"""\n${markdown || "(kosong)"}\n"""\n\nKembalikan JSON dengan field:\n${fields.map((f) => `- ${f}`).join("\n")}`,
         },
       ],
-      config.thinking ? 2000 : 600,
-      25_000,
+      400,
+      15_000,
     );
     const json = reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1);
     const parsed = metaReply.safeParse(JSON.parse(json));

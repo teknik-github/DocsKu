@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, MessageSquareText, MoreHorizontal, PanelLeftClose, Pencil, Pin, PinOff, Plus, Search, Trash2 } from "lucide-react";
+import { FileText, MessageSquareText, MoreHorizontal, PanelLeftClose, Pencil, Pin, PinOff, Plus, Search, Send, Trash2 } from "lucide-react";
 import type { ConversationListItem } from "@/lib/ai/chat-types";
 
 /**
@@ -124,6 +124,12 @@ export function ChatHistory({
               <span className="shrink-0">Umum</span>
             ) : null}
             {showPage && <span aria-hidden>·</span>}
+            {c.source === "telegram" && (
+              <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-sky-100 px-1 text-[10px] font-medium text-sky-700 dark:bg-sky-950/50 dark:text-sky-300" title="Percakapan dari Telegram">
+                <Send className="size-2.5" />
+                Telegram
+              </span>
+            )}
             <span className="shrink-0">{ago(c.updatedAt, now)}</span>
             {c.messageCount > 0 && <span className="ml-auto shrink-0 tabular-nums">{Math.ceil(c.messageCount / 2)}</span>}
           </span>

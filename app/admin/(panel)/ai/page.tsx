@@ -17,7 +17,8 @@ export default function AiChatPage({ searchParams }: PageProps<"/admin/ai">) {
 
 /**
  * `?tulis=topik` (from Statistik → a search without results) pre-fills a request to write about it;
- * `?saran=klik&q=…` (a search with results nobody opened) a request to improve those pages' titles.
+ * `?saran=klik&q=…` (a search with results nobody opened) a request to improve those pages' titles;
+ * `?c=<id>` opens one of the person's chats (links from the Telegram bot).
  */
 async function Chat({ searchParams }: Pick<PageProps<"/admin/ai">, "searchParams">) {
   const user = await requireUser();
@@ -30,9 +31,11 @@ async function Chat({ searchParams }: Pick<PageProps<"/admin/ai">, "searchParams
     (topic
       ? `Pembaca mencari “${topic}” tetapi dokumentasi belum membahasnya. Periksa dulu apakah ada halaman terkait, lalu usulkan halaman baru yang menjawabnya.`
       : undefined);
+  // `?c=<id>`: open that chat (only the person's own chats load).
+  const conversationId = typeof params.c === "string" && /^[0-9a-f-]{36}$/i.test(params.c) ? params.c : undefined;
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface">
-      <AiChat layout="page" enabled={enabled} initialInput={initial} />
+      <AiChat layout="page" enabled={enabled} initialInput={initial} initialConversationId={conversationId} />
     </div>
   );
 }

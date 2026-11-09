@@ -76,6 +76,8 @@ export type ConversationListItem = {
   updatedAt: string;
   messageCount: number;
   pinned: boolean;
+  /** "telegram" for chats with the Telegram bot. */
+  source: string;
 };
 
 export type Conversation = {
